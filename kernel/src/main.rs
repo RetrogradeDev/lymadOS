@@ -6,20 +6,15 @@ extern crate alloc;
 #[cfg(not(test))]
 use core::panic::PanicInfo;
 
-use alloc::boxed::Box;
+use alloc::vec;
+use alloc::{boxed::Box, rc::Rc, vec::Vec};
 use bootloader_api::{BootInfo, BootloaderConfig, config::Mapping, entry_point};
 
 use kernel::{
-    mm::{
-        allocator,
-        memory::{BootInfoFrameAllocator, translate_addr},
-    },
+    mm::{allocator, memory::BootInfoFrameAllocator},
     serial_println,
 };
-use x86_64::{
-    VirtAddr,
-    structures::paging::{PageTable, Translate},
-};
+use x86_64::VirtAddr;
 
 static BOOTLOADER_CONFIG: BootloaderConfig = {
     let mut config = BootloaderConfig::new_default();
@@ -40,7 +35,29 @@ fn main(boot_info: &'static mut BootInfo) -> ! {
 
     allocator::init_heap(&mut mapper, &mut frame_allocator).expect("Heap initialization failed");
 
-    let x = Box::new(42);
+    // allocate a number on the heap
+    let heap_value = Box::new(41);
+    serial_println!("heap_value at {:p}", heap_value);
+
+    // create a dynamically sized vector
+    let mut vec = Vec::new();
+    for i in 0..500 {
+        vec.push(i);
+    }
+    serial_println!("vec at {:p}", vec.as_slice());
+
+    // create a reference counted vector -> will be freed when count reaches 0
+    let reference_counted = Rc::new(vec![1, 2, 3]);
+    let cloned_reference = reference_counted.clone();
+    serial_println!(
+        "current reference count is {}",
+        Rc::strong_count(&cloned_reference)
+    );
+    core::mem::drop(reference_counted);
+    serial_println!(
+        "reference count is {} now",
+        Rc::strong_count(&cloned_reference)
+    );
 
     kernel::drivers::exit::exit_qemu(kernel::drivers::exit::QemuExitCode::Success);
 }
