@@ -1,13 +1,19 @@
 #![no_std]
 #![no_main]
 
+extern crate alloc;
+
 #[cfg(not(test))]
 use core::panic::PanicInfo;
 
+use alloc::boxed::Box;
 use bootloader_api::{BootInfo, BootloaderConfig, config::Mapping, entry_point};
 
 use kernel::{
-    mm::memory::{BootInfoFrameAllocator, translate_addr},
+    mm::{
+        allocator,
+        memory::{BootInfoFrameAllocator, translate_addr},
+    },
     serial_println,
 };
 use x86_64::{
@@ -24,31 +30,17 @@ static BOOTLOADER_CONFIG: BootloaderConfig = {
 entry_point!(main, config = &BOOTLOADER_CONFIG);
 
 fn main(boot_info: &'static mut BootInfo) -> ! {
-    kernel::init();
+    kernel::init(); // If you dare to call serial_print before this, I'm not responsible for the consequences...
 
     serial_println!("Hello World!");
 
+    let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset.into_option().unwrap());
+    let mut mapper = unsafe { kernel::mm::memory::init(phys_mem_offset) };
     let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_regions) };
 
-    let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset.into_option().unwrap());
-    let mapper = unsafe { kernel::mm::memory::init(phys_mem_offset) };
+    allocator::init_heap(&mut mapper, &mut frame_allocator).expect("Heap initialization failed");
 
-    let addresses = [
-        // the identity-mapped vga buffer page
-        0xb8000,
-        // some code page
-        0x201008,
-        // some stack page
-        0x0100_0020_1a10,
-        // virtual address mapped to physical address 0
-        boot_info.physical_memory_offset.into_option().unwrap(),
-    ];
-
-    for &address in &addresses {
-        let virt = VirtAddr::new(address);
-        let phys = mapper.translate_addr(virt);
-        serial_println!("{:?} -> {:?}", virt, phys);
-    }
+    let x = Box::new(42);
 
     kernel::drivers::exit::exit_qemu(kernel::drivers::exit::QemuExitCode::Success);
 }
