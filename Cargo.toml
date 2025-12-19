@@ -3,4 +3,16 @@ name = "lymad_os"
 version = "0.1.0"
 edition = "2024"
 
+[build-dependencies]
+bootloader = "0.11.13"
+kernel = { path = "kernel", artifact = "bin", target = "x86_64-unknown-none" }
+
 [dependencies]
+ovmf-prebuilt = "0.2.5"
+
+[profile.dev]
+panic = "abort"
+strip = "debuginfo"
+
+[profile.release]
+panic = "abort"
