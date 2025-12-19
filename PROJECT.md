@@ -3,21 +3,22 @@ This is my seconds OS project. It will be written in Rust and aim to be a simple
 I'll try to document my progress in JOURNAL.md (or not, idk how boot will work), but don't expect too much structure.
 
 It should should have:
-- working memory management 
-- kernel mapped in the lower half
-- FAT32 filesystem
-- interrupts
-- UEFI bootloader
-- APIC timer
-- syscalls
-- task scheduler
-- userland
-- elf parser
-- VFS
-- basic compatibility with Linux syscalls
-- desktop??
-- mouse/keyboard drivers
-- if possible basic networking
+- [x] working memory management 
+- [ ] kernel mapped in the lower half
+- [ ] FAT32 filesystem
+- [ ] interrupts
+- [x] UEFI bootloader
+- [ ] APIC timer
+- [ ] syscalls
+- [ ] task scheduler
+- [ ] userland
+- [ ] elf parser
+- [ ] VFS
+- [ ] basic compatibility with Linux syscalls
+- [ ] desktop??
+- [ ] mouse/keyboard drivers
+- [ ] if possible basic networking
+- [ ] test runner
 
 Cool achievemnts:
 - run doom
