@@ -13,7 +13,8 @@ fn main(_boot_info: &'static mut BootInfo) -> ! {
     kernel::drivers::serial::init_serial();
 
     serial_println!("Hello World!");
-    kernel::hlt_loop();
+
+    kernel::drivers::exit::exit_qemu(kernel::drivers::exit::QemuExitCode::Success);
 }
 
 #[cfg(not(test))]
@@ -21,5 +22,6 @@ fn main(_boot_info: &'static mut BootInfo) -> ! {
 fn panic(info: &PanicInfo) -> ! {
     serial_println!("[failed]\n");
     serial_println!("Error: {}\n", info);
-    kernel::hlt_loop();
+
+    kernel::drivers::exit::exit_qemu(kernel::drivers::exit::QemuExitCode::Failed);
 }
