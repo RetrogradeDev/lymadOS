@@ -1,2 +1,4 @@
-pub mod allocator;
+// pub mod allocator;
 pub mod memory;
+
+pub mod slub_allocator;

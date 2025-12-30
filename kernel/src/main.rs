@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+use x86_64::structures::paging::FrameAllocator;
 extern crate alloc;
 
 #[cfg(not(test))]
@@ -10,6 +11,7 @@ use alloc::vec;
 use alloc::{boxed::Box, rc::Rc, vec::Vec};
 use bootloader_api::{BootInfo, BootloaderConfig, config::Mapping, entry_point};
 
+use kernel::mm::slub_allocator;
 use kernel::{
     mm::{allocator, memory::BootInfoFrameAllocator},
     serial_println,
@@ -33,7 +35,14 @@ fn main(boot_info: &'static mut BootInfo) -> ! {
     let mut mapper = unsafe { kernel::mm::memory::init(phys_mem_offset) };
     let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_regions) };
 
-    allocator::init_heap(&mut mapper, &mut frame_allocator).expect("Heap initialization failed");
+    let alloc_frame = move || {
+        frame_allocator
+            .allocate_frame()
+            .map(|frame| frame.start_address().as_u64() as *mut u8)
+    };
+
+    //allocator::init_heap(&mut mapper, &mut frame_allocator).expect("Heap initialization failed");
+    unsafe { slub_allocator::init_slub_allocator(alloc_frame) };
 
     // allocate a number on the heap
     let heap_value = Box::new(41);
