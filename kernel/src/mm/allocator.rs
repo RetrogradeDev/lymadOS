@@ -1,42 +1,146 @@
-use linked_list_allocator::LockedHeap;
-use x86_64::{
-    VirtAddr,
-    structures::paging::{
-        FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB, mapper::MapToError,
-    },
-};
+use crate::mm::memory::BootInfoFrameAllocator;
+use crate::mm::slub::{PAGE_SIZE, PageProvider, SCache};
+use core::alloc::{GlobalAlloc, Layout};
+use core::ptr;
+use spin::Mutex;
+use x86_64::{VirtAddr, structures::paging::FrameAllocator};
 
-pub const HEAP_START: usize = 0x4444_4444_0000;
-pub const HEAP_SIZE: usize = 100 * 1024; // 100 KiB
+pub struct GlobalPageAllocator {
+    frame_allocator: BootInfoFrameAllocator,
+    phys_mem_offset: VirtAddr,
+}
+
+impl PageProvider for GlobalPageAllocator {
+    fn alloc_page(&mut self) -> Option<*mut u8> {
+        let frame = self.frame_allocator.allocate_frame()?;
+        let phys_addr = frame.start_address();
+        let virt_addr = self.phys_mem_offset + phys_addr.as_u64();
+        Some(virt_addr.as_mut_ptr())
+    }
+
+    fn free_page(&mut self, _ptr: *mut u8) {
+        // BootInfoFrameAllocator doesn't support deallocation.
+        // TODO: use a proper frame allocator (e.g. buddy system).
+    }
+}
+
+static PAGE_ALLOCATOR: Mutex<Option<GlobalPageAllocator>> = Mutex::new(None);
+
+pub struct SlubAllocator {
+    caches: [Mutex<SCache>; 8], // 16, 32, 64, 128, 256, 512, 1024, 2048
+}
+
+impl SlubAllocator {
+    pub const fn new() -> Self {
+        Self {
+            caches: [
+                Mutex::new(SCache::new(16)),
+                Mutex::new(SCache::new(32)),
+                Mutex::new(SCache::new(64)),
+                Mutex::new(SCache::new(128)),
+                Mutex::new(SCache::new(256)),
+                Mutex::new(SCache::new(512)),
+                Mutex::new(SCache::new(1024)),
+                Mutex::new(SCache::new(2048)),
+            ],
+        }
+    }
+}
+
+unsafe impl GlobalAlloc for SlubAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        let size = layout.size();
+
+        // Handle large allocations (> 2048 bytes)
+        if size > 2048 {
+            // We only support single page allocations for large objects for now
+            // TODO: Implement multi-page allocations
+            if size <= PAGE_SIZE {
+                let mut provider = PAGE_ALLOCATOR.lock();
+                if let Some(p) = provider.as_mut() {
+                    if let Some(ptr) = p.alloc_page() {
+                        return ptr;
+                    }
+                }
+            }
+            return ptr::null_mut();
+        }
+
+        // Find index
+        let index = if size <= 16 {
+            0
+        } else if size <= 32 {
+            1
+        } else if size <= 64 {
+            2
+        } else if size <= 128 {
+            3
+        } else if size <= 256 {
+            4
+        } else if size <= 512 {
+            5
+        } else if size <= 1024 {
+            6
+        } else {
+            7
+        };
+
+        let mut cache = self.caches[index].lock();
+        let mut provider = PAGE_ALLOCATOR.lock();
+        if let Some(p) = provider.as_mut() {
+            cache.alloc(p).unwrap_or(ptr::null_mut())
+        } else {
+            ptr::null_mut()
+        }
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        let size = layout.size();
+        if size > 2048 {
+            let mut provider = PAGE_ALLOCATOR.lock();
+            if let Some(p) = provider.as_mut() {
+                p.free_page(ptr);
+            }
+            return;
+        }
+
+        let index = if size <= 16 {
+            0
+        } else if size <= 32 {
+            1
+        } else if size <= 64 {
+            2
+        } else if size <= 128 {
+            3
+        } else if size <= 256 {
+            4
+        } else if size <= 512 {
+            5
+        } else if size <= 1024 {
+            6
+        } else {
+            7
+        };
+
+        let mut cache = self.caches[index].lock();
+        let mut provider = PAGE_ALLOCATOR.lock();
+        if let Some(p) = provider.as_mut() {
+            unsafe { cache.dealloc(ptr, p) };
+        }
+    }
+}
 
 #[global_allocator]
-static ALLOCATOR: LockedHeap = LockedHeap::empty();
+static ALLOCATOR: SlubAllocator = SlubAllocator::new();
 
 pub fn init_heap(
-    mapper: &mut impl Mapper<Size4KiB>,
-    frame_allocator: &mut impl FrameAllocator<Size4KiB>,
-) -> Result<(), MapToError<Size4KiB>> {
-    let page_range = {
-        let heap_start = VirtAddr::new(HEAP_START as u64);
-        let heap_end = heap_start + HEAP_SIZE as u64 - 1u64;
-        let heap_start_page = Page::containing_address(heap_start);
-        let heap_end_page = Page::containing_address(heap_end);
-
-        Page::range_inclusive(heap_start_page, heap_end_page)
-    };
-
-    for page in page_range {
-        let frame = frame_allocator
-            .allocate_frame()
-            .ok_or(MapToError::FrameAllocationFailed)?;
-
-        let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE;
-        unsafe { mapper.map_to(page, frame, flags, frame_allocator)?.flush() };
-    }
-
-    unsafe {
-        ALLOCATOR.lock().init(HEAP_START as *mut u8, HEAP_SIZE);
-    }
-
+    frame_allocator: BootInfoFrameAllocator,
+    phys_mem_offset: VirtAddr,
+) -> Result<(), ()> {
+    let mut provider = PAGE_ALLOCATOR.lock();
+    *provider = Some(GlobalPageAllocator {
+        frame_allocator,
+        phys_mem_offset,
+    });
     Ok(())
 }
