@@ -1,3 +1,4 @@
+use crate::mm::buddy::BuddyAllocator;
 use crate::mm::memory::BootInfoFrameAllocator;
 use crate::mm::slub::{PAGE_SIZE, PageProvider, SCache};
 use core::alloc::{GlobalAlloc, Layout};
@@ -6,21 +7,21 @@ use spin::Mutex;
 use x86_64::{VirtAddr, structures::paging::FrameAllocator};
 
 pub struct GlobalPageAllocator {
-    frame_allocator: BootInfoFrameAllocator,
+    frame_allocator: BuddyAllocator,
     phys_mem_offset: VirtAddr,
 }
 
 impl PageProvider for GlobalPageAllocator {
     fn alloc_page(&mut self) -> Option<*mut u8> {
-        let frame = self.frame_allocator.allocate_frame()?;
-        let phys_addr = frame.start_address();
-        let virt_addr = self.phys_mem_offset + phys_addr.as_u64();
-        Some(virt_addr.as_mut_ptr())
+        // We only support 4KiB pages for now (order 0)
+        // TODO: support larger pages
+        let frame = unsafe { self.frame_allocator.alloc(0) }?;
+        // This should be a virtual address
+        Some(frame)
     }
 
-    fn free_page(&mut self, _ptr: *mut u8) {
-        // BootInfoFrameAllocator doesn't support deallocation.
-        // TODO: use a proper frame allocator (e.g. buddy system).
+    fn free_page(&mut self, ptr: *mut u8) {
+        unsafe { self.frame_allocator.dealloc(ptr, 0) };
     }
 }
 
@@ -133,10 +134,7 @@ unsafe impl GlobalAlloc for SlubAllocator {
 #[global_allocator]
 static ALLOCATOR: SlubAllocator = SlubAllocator::new();
 
-pub fn init_heap(
-    frame_allocator: BootInfoFrameAllocator,
-    phys_mem_offset: VirtAddr,
-) -> Result<(), ()> {
+pub fn init_heap(frame_allocator: BuddyAllocator, phys_mem_offset: VirtAddr) -> Result<(), ()> {
     let mut provider = PAGE_ALLOCATOR.lock();
     *provider = Some(GlobalPageAllocator {
         frame_allocator,
