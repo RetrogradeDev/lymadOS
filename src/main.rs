@@ -48,7 +48,7 @@ fn main() {
 
     match status.code() {
         Some(code) => {
-            if code == 0x10 {
+            if code == 0x11 {
                 println!("QEMU exited with success.");
             } else {
                 println!("QEMU exited with failure code: {code}");
