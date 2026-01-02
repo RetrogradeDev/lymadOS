@@ -44,7 +44,7 @@ fn main(boot_info: &'static mut BootInfo) -> ! {
         unsafe { buddy.add_frame(virt_addr.as_mut_ptr()) };
     }
 
-    allocator::init_heap(buddy, phys_mem_offset).expect("Heap initialization failed");
+    allocator::init_heap(buddy).expect("Heap initialization failed");
 
     // allocate a number on the heap
     let heap_value = Box::new(41);

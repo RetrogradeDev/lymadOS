@@ -1,5 +1,8 @@
 use ovmf_prebuilt::{Arch, FileType, Prebuilt, Source};
 
+#[cfg(test)]
+mod allocator_tests; // I have no idea why rust shows an error but it works fine so idc
+
 const UEFI_PATH: &str = env!("UEFI_PATH");
 
 fn main() {

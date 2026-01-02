@@ -8,3 +8,6 @@ bootloader_api = "0.11.13"
 spin = "0.10.0"
 uart_16550 = "0.4.0"
 x86_64 = "0.15.4"
+
+[features]
+no_global_allocator = []

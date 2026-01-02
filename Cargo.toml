@@ -10,6 +10,9 @@ kernel = { path = "kernel", artifact = "bin", target = "x86_64-unknown-none" }
 [dependencies]
 ovmf-prebuilt = "0.2.5"
 
+[dev-dependencies]
+kernel = { path = "kernel", features = ["no_global_allocator"] }
+
 [workspace]
 members = [ "kernel" ]
 

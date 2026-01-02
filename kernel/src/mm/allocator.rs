@@ -1,14 +1,11 @@
 use crate::mm::buddy::BuddyAllocator;
-use crate::mm::memory::BootInfoFrameAllocator;
 use crate::mm::slub::{PAGE_SIZE, PageProvider, SCache};
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr;
 use spin::Mutex;
-use x86_64::{VirtAddr, structures::paging::FrameAllocator};
 
 pub struct GlobalPageAllocator {
     frame_allocator: BuddyAllocator,
-    phys_mem_offset: VirtAddr,
 }
 
 impl PageProvider for GlobalPageAllocator {
@@ -131,14 +128,12 @@ unsafe impl GlobalAlloc for SlubAllocator {
     }
 }
 
+#[cfg(not(feature = "no_global_allocator"))] // Fixes issues with tests
 #[global_allocator]
 static ALLOCATOR: SlubAllocator = SlubAllocator::new();
 
-pub fn init_heap(frame_allocator: BuddyAllocator, phys_mem_offset: VirtAddr) -> Result<(), ()> {
+pub fn init_heap(frame_allocator: BuddyAllocator) -> Result<(), ()> {
     let mut provider = PAGE_ALLOCATOR.lock();
-    *provider = Some(GlobalPageAllocator {
-        frame_allocator,
-        phys_mem_offset,
-    });
+    *provider = Some(GlobalPageAllocator { frame_allocator });
     Ok(())
 }
