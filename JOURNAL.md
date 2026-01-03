@@ -11,3 +11,5 @@ Oh after 15 mins of questioning my life choices I found out that bootloader v0.1
 
 ## 2/1/2026 Forgot to log my work of the last 3 days
 I spent the last 3 days implementing a basic SLUB allocator, and a Buddy Frame Allocator. I learnt a lot about memory management in the process, and I think I have a good understanding of how it works now. They both worked fine the first try, which is nice but also a bit suspicious. I wrote some tests because of this, but they all passed, so I guess I'll find out later if something is broken. Next step will be using a bitmap in the frame allocator instead of a linked list, and then I can finally implement GDT, IDT and basic interrupts.
+
+I spent an hour today refactoring the Buddy Allocator to use a bitmap and a double linked list. It was a bit tricky, but I think I got it working. I learnt creating a 32KB array on the stack is not a good idea, and horrible to debug.
