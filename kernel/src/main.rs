@@ -33,18 +33,16 @@ fn main(boot_info: &'static mut BootInfo) -> ! {
     let _mapper = unsafe { kernel::mm::memory::init(phys_mem_offset) };
     let frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_regions) };
 
-    let mut buddy = kernel::mm::buddy::BuddyAllocator::new();
-    serial_println!("Buddy Allocator initialized: {:p}", &buddy as *const _);
+    serial_println!("Initializing heap...");
+    allocator::init_heap(phys_mem_offset.as_u64() as usize).expect("Heap initialization failed");
 
     // Just grab all frames and add them to the buddy system for testing
     let mut frame_iter = frame_allocator.usable_frames();
     for frame in frame_iter.by_ref() {
         let phys_addr = frame.start_address();
         let virt_addr = phys_mem_offset + phys_addr.as_u64();
-        unsafe { buddy.add_frame(virt_addr.as_mut_ptr()) };
+        allocator::add_frame(virt_addr.as_mut_ptr());
     }
-
-    allocator::init_heap(buddy).expect("Heap initialization failed");
 
     // allocate a number on the heap
     let heap_value = Box::new(41);

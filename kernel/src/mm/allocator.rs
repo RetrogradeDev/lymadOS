@@ -132,8 +132,21 @@ unsafe impl GlobalAlloc for SlubAllocator {
 #[global_allocator]
 static ALLOCATOR: SlubAllocator = SlubAllocator::new();
 
-pub fn init_heap(frame_allocator: BuddyAllocator) -> Result<(), ()> {
+pub fn init_heap(offset: usize) -> Result<(), ()> {
     let mut provider = PAGE_ALLOCATOR.lock();
-    *provider = Some(GlobalPageAllocator { frame_allocator });
+    // Initialize directly in the Option to avoid stack overflow
+    *provider = Some(GlobalPageAllocator {
+        frame_allocator: BuddyAllocator::new(),
+    });
+    if let Some(p) = provider.as_mut() {
+        p.frame_allocator.set_offset(offset);
+    }
     Ok(())
+}
+
+pub fn add_frame(start: *mut u8) {
+    let mut provider = PAGE_ALLOCATOR.lock();
+    if let Some(p) = provider.as_mut() {
+        unsafe { p.frame_allocator.add_frame(start) };
+    }
 }
