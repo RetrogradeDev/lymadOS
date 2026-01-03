@@ -2,7 +2,7 @@ use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
 
 use crate::{
     drivers::exit::{QemuExitCode, exit_qemu},
-    serial_println,
+    gdt, serial_println,
 };
 
 use spin::Lazy;
@@ -10,7 +10,11 @@ use spin::Lazy;
 pub static IDT: Lazy<InterruptDescriptorTable> = Lazy::new(|| {
     let mut idt = InterruptDescriptorTable::new();
 
-    idt.double_fault.set_handler_fn(double_fault_handler);
+    unsafe {
+        idt.double_fault
+            .set_handler_fn(double_fault_handler)
+            .set_stack_index(gdt::DOUBLE_FAULT_IST_INDEX)
+    };
     idt.divide_error.set_handler_fn(divide_by_zero_handler);
 
     idt

@@ -36,10 +36,11 @@ fn main(boot_info: &'static mut BootInfo) -> ! {
     serial_println!("Initializing heap...");
     allocator::init_heap(phys_mem_offset.as_u64() as usize).expect("Heap initialization failed");
 
-    // trigger a page fault
-    unsafe {
-        *(0xdeadbeef as *mut u8) = 42;
-    };
+    fn stack_overflow() {
+        stack_overflow(); // for each recursion, the return address is pushed onto the stack
+    }
+
+    stack_overflow();
 
     // Just grab all frames and add them to the buddy system for testing
     let mut frame_iter = frame_allocator.usable_frames();
