@@ -1,5 +1,6 @@
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
 
+use crate::drivers;
 use crate::{
     drivers::exit::{QemuExitCode, exit_qemu},
     gdt, serial_println,
@@ -7,6 +8,8 @@ use crate::{
 
 use spin::Lazy;
 
+#[derive(Debug, Clone, Copy)]
+#[repr(u8)]
 pub enum InterruptIndex {
     Keyboard = 33,
     Timer = 32,
@@ -22,6 +25,11 @@ pub static IDT: Lazy<InterruptDescriptorTable> = Lazy::new(|| {
             .set_stack_index(gdt::DOUBLE_FAULT_IST_INDEX)
     };
     idt.divide_error.set_handler_fn(divide_by_zero_handler);
+
+    idt[InterruptIndex::Timer as u8].set_handler_fn(drivers::pit::timer_interrupt_handler);
+    idt[InterruptIndex::Keyboard as u8]
+        .set_handler_fn(drivers::keyboard::keyboard_interrupt_handler);
+    idt[InterruptIndex::Mouse as u8].set_handler_fn(drivers::mouse::mouse_interrupt_handler);
 
     idt
 });

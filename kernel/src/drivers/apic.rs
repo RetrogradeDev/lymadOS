@@ -218,10 +218,7 @@ pub unsafe fn init(
     frame_allocator: &mut impl FrameAllocator<Size4KiB>,
 ) {
     let tables = read_acpi_tables(rsdp_addr, physical_memory_offset);
-    let (model, processor_info) = InterruptModel::new(&tables).unwrap();
-
-    serial_println!("Interrupt Model: {:?}", model);
-    serial_println!("Processor info: {:#?}", processor_info);
+    let (model, _processor_info) = InterruptModel::new(&tables).unwrap();
 
     match model {
         InterruptModel::Apic(apic) => {

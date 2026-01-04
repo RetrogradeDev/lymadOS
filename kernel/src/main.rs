@@ -10,11 +10,13 @@ use alloc::vec;
 use alloc::{boxed::Box, rc::Rc, vec::Vec};
 use bootloader_api::{BootInfo, BootloaderConfig, config::Mapping, entry_point};
 
+use kernel::hlt_loop;
 use kernel::{
     mm::{allocator, memory::BootInfoFrameAllocator},
     serial_println,
 };
 use x86_64::VirtAddr;
+use x86_64::instructions::interrupts;
 
 static BOOTLOADER_CONFIG: BootloaderConfig = {
     let mut config = BootloaderConfig::new_default();
@@ -43,6 +45,9 @@ fn main(boot_info: &'static mut BootInfo) -> ! {
         let virt_addr = phys_mem_offset + phys_addr.as_u64();
         allocator::add_frame(virt_addr.as_mut_ptr());
     }
+
+    // drop the iterator to make us able to borrow frame_allocator again later
+    drop(frame_iter);
 
     // allocate a number on the heap
     let heap_value = Box::new(41);
@@ -78,7 +83,11 @@ fn main(boot_info: &'static mut BootInfo) -> ! {
         );
     };
 
-    kernel::drivers::exit::exit_qemu(kernel::drivers::exit::QemuExitCode::Success);
+    interrupts::enable();
+
+    hlt_loop();
+
+    // kernel::drivers::exit::exit_qemu(kernel::drivers::exit::QemuExitCode::Success);
 }
 
 #[cfg(not(test))]
