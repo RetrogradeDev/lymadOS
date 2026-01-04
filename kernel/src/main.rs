@@ -30,17 +30,11 @@ fn main(boot_info: &'static mut BootInfo) -> ! {
     serial_println!("Hello World!");
 
     let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset.into_option().unwrap());
-    let _mapper = unsafe { kernel::mm::memory::init(phys_mem_offset) };
-    let frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_regions) };
+    let mut mapper = unsafe { kernel::mm::memory::init(phys_mem_offset) };
+    let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_regions) };
 
     serial_println!("Initializing heap...");
     allocator::init_heap(phys_mem_offset.as_u64() as usize).expect("Heap initialization failed");
-
-    fn stack_overflow() {
-        stack_overflow(); // for each recursion, the return address is pushed onto the stack
-    }
-
-    stack_overflow();
 
     // Just grab all frames and add them to the buddy system for testing
     let mut frame_iter = frame_allocator.usable_frames();
@@ -73,6 +67,16 @@ fn main(boot_info: &'static mut BootInfo) -> ! {
         "reference count is {} now",
         Rc::strong_count(&cloned_reference)
     );
+
+    serial_println!("Initializing APIC...");
+    unsafe {
+        kernel::drivers::apic::init(
+            *boot_info.rsdp_addr.as_ref().unwrap() as usize,
+            phys_mem_offset,
+            &mut mapper,
+            &mut frame_allocator,
+        );
+    };
 
     kernel::drivers::exit::exit_qemu(kernel::drivers::exit::QemuExitCode::Success);
 }

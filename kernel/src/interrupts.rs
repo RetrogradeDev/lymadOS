@@ -7,6 +7,12 @@ use crate::{
 
 use spin::Lazy;
 
+pub enum InterruptIndex {
+    Keyboard = 33,
+    Timer = 32,
+    Mouse = 44,
+}
+
 pub static IDT: Lazy<InterruptDescriptorTable> = Lazy::new(|| {
     let mut idt = InterruptDescriptorTable::new();
 

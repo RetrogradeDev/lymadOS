@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+acpi = "4.1.1" # TODO: Update to 6.x.x
 bootloader_api = "0.11.13"
 spin = "0.10.0"
 uart_16550 = "0.4.0"

@@ -1,3 +1,4 @@
+pub mod apic;
 pub mod exit;
 pub mod serial;
 
