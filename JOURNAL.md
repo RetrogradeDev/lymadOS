@@ -15,3 +15,9 @@ I spent the last 3 days implementing a basic SLUB allocator, and a Buddy Frame A
 I spent an hour today refactoring the Buddy Allocator to use a bitmap and a double linked list. It was a bit tricky, but I think I got it working. I learnt creating a 32KB array on the stack is not a good idea, and horrible to debug.
 
 Alright, I spent another hour implementing the GDT and TSS. It was pretty straightforward, I just followed Philip Oppermann's blog post on the topic. I also set up the stack for double faults, so that's nice. Next step is to implement a basic APIC timer, and keyboard interrupts.
+
+## 3/1/2026 2:30h of work
+I spent 2.5 hours today implementing a basic ACPI parser and APIC timer. It was a bit tricky, but I based a lot of the code on my previous OS project, so that helped. The timer seems to work fine, I can set up periodic interrupts and handle them. Next step is to implement keyboard interrupts.
+
+# 4/1/2026 2h of work
+I spent WAY too long debugging keyboard interrupts today. Turns out QEMU doesn't forward keyboard interrupts when using the "none" display option. After disabling that, everything worked fine, so I wasted more than an hour debugging this. I also implemented a basic keyboard driver that can read scancodes and print them. Next step is either some based event architecture to forward all these events (but I have to think about the design first), fix mouse interrupts or work on the userland.
