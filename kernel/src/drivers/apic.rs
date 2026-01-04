@@ -1,57 +1,11 @@
-use acpi::{AcpiHandler, AcpiTables, InterruptModel};
+use acpi::platform::InterruptModel;
 use spin::{Lazy, Mutex};
 use x86_64::{
     PhysAddr, VirtAddr,
     structures::paging::{FrameAllocator, Mapper, PhysFrame, Size4KiB},
 };
 
-use crate::{interrupts::InterruptIndex, serial_println};
-
-#[derive(Clone)]
-struct MyHandler {
-    physical_memory_offset: VirtAddr,
-}
-
-impl MyHandler {
-    pub fn new(physical_memory_offset: VirtAddr) -> Self {
-        MyHandler {
-            physical_memory_offset,
-        }
-    }
-}
-
-impl AcpiHandler for MyHandler {
-    unsafe fn map_physical_region<T>(
-        &self,
-        physical_address: usize,
-        size: usize,
-    ) -> acpi::PhysicalMapping<Self, T> {
-        let virtual_address = self.physical_memory_offset.as_u64() + physical_address as u64;
-        let ptr = virtual_address as *mut T;
-
-        unsafe {
-            acpi::PhysicalMapping::new(
-                physical_address,
-                core::ptr::NonNull::new(ptr).unwrap(),
-                size,
-                size,
-                self.clone(),
-            )
-        }
-    }
-
-    fn unmap_physical_region<T>(_region: &acpi::PhysicalMapping<Self, T>) {
-        // No-op for our simple implementation
-    }
-}
-
-pub fn parse_acpi(rsdp_addr: usize, physical_memory_offset: VirtAddr) -> acpi::InterruptModel {
-    let handler = MyHandler::new(physical_memory_offset);
-    let acpi_tables = unsafe { AcpiTables::from_rsdp(handler, rsdp_addr).unwrap() };
-    let platform = acpi_tables.platform_info().unwrap();
-
-    platform.interrupt_model
-}
+use crate::{drivers::acpi::read_acpi_tables, interrupts::InterruptIndex, serial_println};
 
 static LAPIC_ADDR: Lazy<Mutex<LAPICAddress>> = Lazy::new(|| Mutex::new(LAPICAddress::new()));
 
@@ -263,7 +217,11 @@ pub unsafe fn init(
     page_table: &mut impl Mapper<Size4KiB>,
     frame_allocator: &mut impl FrameAllocator<Size4KiB>,
 ) {
-    let model = parse_acpi(rsdp_addr, physical_memory_offset);
+    let tables = read_acpi_tables(rsdp_addr, physical_memory_offset);
+    let (model, processor_info) = InterruptModel::new(&tables).unwrap();
+
+    serial_println!("Interrupt Model: {:?}", model);
+    serial_println!("Processor info: {:#?}", processor_info);
 
     match model {
         InterruptModel::Apic(apic) => {
