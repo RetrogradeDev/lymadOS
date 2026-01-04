@@ -21,7 +21,7 @@ fn main() {
     cmd.arg("-serial").arg("stdio");
 
     // Disable graphics
-    cmd.arg("-display").arg("none");
+    // cmd.arg("-display").arg("none"); // This also disables input devices like keyboard and mousev, so we we need to use it with the window
 
     // Enable debug exit
     cmd.arg("-device")

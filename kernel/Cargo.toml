@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 acpi = "6.0.1"
 bootloader_api = "0.11.13"
+pc-keyboard = "0.8.0"
 spin = "0.10.0"
 uart_16550 = "0.4.0"
 x86_64 = "0.15.4"
