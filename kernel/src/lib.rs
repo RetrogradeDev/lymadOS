@@ -6,6 +6,7 @@ extern crate alloc;
 use x86_64::instructions::hlt;
 
 pub mod drivers;
+pub mod events;
 pub mod gdt;
 pub mod interrupts;
 pub mod mm;

@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 acpi = "6.0.1"
 bootloader_api = "0.11.13"
+crossbeam-queue = { version = "0.3.12", default-features = false, features = ["alloc"] }
 pc-keyboard = "0.8.0"
 spin = "0.10.0"
 uart_16550 = "0.4.0"

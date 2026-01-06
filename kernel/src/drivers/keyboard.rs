@@ -1,7 +1,8 @@
-use crate::{drivers::apic::end_interrupt, serial_println};
+use crate::drivers::apic::end_interrupt;
+use crate::events::{Event, KeyboardEvent, push_event};
 use pc_keyboard::{HandleControl, Keyboard, ScancodeSet1, layouts};
 use spin::{Lazy, Mutex};
-use x86_64::instructions::port::Port;
+use x86_64::instructions::port::PortReadOnly;
 use x86_64::structures::idt::InterruptStackFrame;
 
 // TODO: Do some research on scancode sets
@@ -14,21 +15,18 @@ static KEYBOARD: Lazy<Mutex<Keyboard<layouts::Azerty, ScancodeSet1>>> = Lazy::ne
 });
 
 pub extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    let mut port = Port::new(0x60);
+    let mut port = PortReadOnly::new(0x60);
     let scancode: u8 = unsafe { port.read() };
 
     let mut keyboard = KEYBOARD.lock();
     if let Ok(Some(key_event)) = keyboard.add_byte(scancode) {
-        if let Some(key) = keyboard.process_keyevent(key_event) {
-            match key {
-                pc_keyboard::DecodedKey::Unicode(character) => {
-                    serial_println!("Key pressed: {}", character);
-                }
-                pc_keyboard::DecodedKey::RawKey(key) => {
-                    serial_println!("Key pressed: {:?}", key);
-                }
-            }
-        }
+        let event = match key_event.state {
+            pc_keyboard::KeyState::Down => KeyboardEvent::KeyPressed(key_event.code),
+            pc_keyboard::KeyState::Up => KeyboardEvent::KeyReleased(key_event.code),
+            pc_keyboard::KeyState::SingleShot => KeyboardEvent::SingleShot(key_event.code),
+        };
+
+        push_event(Event::KeyboardEvent(event));
     }
 
     // Acknowledge the interrupt
