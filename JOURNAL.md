@@ -22,5 +22,7 @@ I spent 2.5 hours today implementing a basic ACPI parser and APIC timer. It was 
 # 4/1/2026 2h of work
 I spent WAY too long debugging keyboard interrupts today. Turns out QEMU doesn't forward keyboard interrupts when using the "none" display option. After disabling that, everything worked fine, so I wasted more than an hour debugging this. I also implemented a basic keyboard driver that can read scancodes and print them. Next step is either some based event architecture to forward all these events (but I have to think about the design first), fix mouse interrupts or work on the userland.
 
-# 6/1/2026 0:30h (today and yesterday combined)
+# 6/1/2026 1h (today and yesterday combined)
 I spent some time yesterday and today implementing a very basic event system. It ended up being just a global ArrayQueue, but it works fine for now. Next step is fixing mouse interrupts.
+
+Alright, I spent 30 minutes figuring our how to enable the mouse by sending data over the ports, and then realised "ps2-mouse", the crate I ended up using to decode the mouse packets, already has an init function that does exactly that. We can now read mouse packets and add their states to the event queue. Next step is to implement a either a basic way of writing stuff to the screen, or the userland.
