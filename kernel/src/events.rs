@@ -4,13 +4,14 @@ use spin::Lazy;
 
 use crate::serial_println;
 
-const EVENT_QUEUE_SIZE: usize = 1024;
+const EVENT_QUEUE_SIZE: usize = 128;
 
 static EVENT_QUEUE: Lazy<ArrayQueue<Event>> = Lazy::new(|| ArrayQueue::new(EVENT_QUEUE_SIZE));
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub enum Event {
     KeyboardEvent(KeyboardEvent),
+    MouseEvent(ps2_mouse::MouseState),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

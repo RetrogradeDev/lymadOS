@@ -9,4 +9,6 @@ pub mod serial;
 /// Initialize all drivers
 pub fn init() {
     serial::init_serial();
+
+    mouse::init_mouse();
 }
