@@ -1,4 +1,4 @@
-use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
+use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 
 use crate::drivers;
 use crate::{
@@ -22,8 +22,17 @@ pub static IDT: Lazy<InterruptDescriptorTable> = Lazy::new(|| {
     unsafe {
         idt.double_fault
             .set_handler_fn(double_fault_handler)
-            .set_stack_index(gdt::DOUBLE_FAULT_IST_INDEX)
-    };
+            .set_stack_index(gdt::DOUBLE_FAULT_IST_INDEX);
+
+        idt.general_protection_fault
+            .set_handler_fn(general_protection_fault_handler)
+            .set_stack_index(gdt::GENERAL_PROTECTION_FAULT_IST_INDEX);
+
+        idt.page_fault
+            .set_handler_fn(page_fault_handler)
+            .set_stack_index(gdt::PAGE_FAULT_IST_INDEX);
+    }
+
     idt.divide_error.set_handler_fn(divide_by_zero_handler);
 
     idt[InterruptIndex::Timer as u8].set_handler_fn(drivers::pit::timer_interrupt_handler);
@@ -49,6 +58,31 @@ extern "x86-interrupt" fn double_fault_handler(
     _error_code: u64,
 ) -> ! {
     serial_println!("EXCEPTION: DOUBLE FAULT\n{:#?}", stack_frame);
+
+    exit_qemu(QemuExitCode::Failed)
+}
+
+extern "x86-interrupt" fn page_fault_handler(
+    stack_frame: InterruptStackFrame,
+    error_code: PageFaultErrorCode,
+) {
+    use x86_64::registers::control::Cr2;
+
+    serial_println!("EXCEPTION: PAGE FAULT");
+    serial_println!("Accessed Address: {:?}", Cr2::read());
+    serial_println!("Error Code: {:?}", error_code);
+    serial_println!("{:#?}", stack_frame);
+
+    exit_qemu(QemuExitCode::Failed)
+}
+
+extern "x86-interrupt" fn general_protection_fault_handler(
+    stack_frame: InterruptStackFrame,
+    error_code: u64,
+) {
+    serial_println!("EXCEPTION: GENERAL PROTECTION FAULT");
+    serial_println!("Error Code: {:?}", error_code);
+    serial_println!("{:#?}", stack_frame);
 
     exit_qemu(QemuExitCode::Failed)
 }
