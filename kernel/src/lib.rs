@@ -18,6 +18,8 @@ pub fn init() {
 
     gdt::init();
     interrupts::init();
+
+    tasks::init();
 }
 
 /// Halt the CPU forever

@@ -12,6 +12,7 @@ ps2-mouse = "0.1.4"
 spin = "0.10.0"
 uart_16550 = "0.4.0"
 x86_64 = "0.15.4"
+raw-cpuid = "11.6.0"
 
 [features]
 no_global_allocator = []

@@ -5,6 +5,8 @@
 // - Task: Individual task/process representation
 // - Scheduler: Round-robin task scheduling // TODO: More advanced scheduling algorithms
 
+// TODO: Split into multiple files if it gets too big
+
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, Ordering};
@@ -13,12 +15,17 @@ use spin::Mutex;
 use crate::gdt::GDT;
 
 pub mod switch;
+pub mod syscall;
 
 /// Size of each task's user stack (1 page = 4KiB)
 const USER_STACK_SIZE: usize = 4096; // TODO: Auto scale or smth
 
 /// Size of each task's kernel stack (1 page = 4KiB)  
 const KERNEL_STACK_SIZE: usize = 4096;
+
+pub fn init() {
+    syscall::init_syscalls();
+}
 
 /// CPU register state saved during context switch
 /// This struct is used by the assembly context switch code
