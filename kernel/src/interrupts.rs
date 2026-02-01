@@ -1,6 +1,7 @@
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 
 use crate::drivers;
+use crate::tasks::switch::timer_interrupt_entry;
 use crate::{
     drivers::exit::{QemuExitCode, exit_qemu},
     gdt, serial_println,
@@ -35,7 +36,13 @@ pub static IDT: Lazy<InterruptDescriptorTable> = Lazy::new(|| {
 
     idt.divide_error.set_handler_fn(divide_by_zero_handler);
 
-    idt[InterruptIndex::Timer as u8].set_handler_fn(drivers::pit::timer_interrupt_handler);
+    // We cast to the expected type since it's a naked function that manages its own frame
+    unsafe {
+        let handler: extern "x86-interrupt" fn(InterruptStackFrame) =
+            core::mem::transmute(timer_interrupt_entry as *const ());
+        idt[InterruptIndex::Timer as u8].set_handler_fn(handler);
+    }
+
     idt[InterruptIndex::Keyboard as u8]
         .set_handler_fn(drivers::keyboard::keyboard_interrupt_handler);
     idt[InterruptIndex::Mouse as u8].set_handler_fn(drivers::mouse::mouse_interrupt_handler);

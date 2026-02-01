@@ -10,6 +10,7 @@ pub mod events;
 pub mod gdt;
 pub mod interrupts;
 pub mod mm;
+pub mod tasks;
 
 /// Initialize the kernel
 pub fn init() {

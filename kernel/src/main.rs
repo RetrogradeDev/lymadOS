@@ -3,20 +3,20 @@
 
 extern crate alloc;
 
+use alloc::{boxed::Box, rc::Rc, vec, vec::Vec};
+
 #[cfg(not(test))]
 use core::panic::PanicInfo;
 
-use alloc::vec;
-use alloc::{boxed::Box, rc::Rc, vec::Vec};
 use bootloader_api::{BootInfo, BootloaderConfig, config::Mapping, entry_point};
 
 use kernel::{
     mm::{allocator, memory::BootInfoFrameAllocator},
     serial_println,
+    tasks::{SCHEDULER, Task, switch::switch_to_first_task},
 };
 use x86_64::VirtAddr;
 use x86_64::instructions::interrupts;
-use x86_64::structures::paging::{Page, PageTableFlags, Size4KiB};
 
 static BOOTLOADER_CONFIG: BootloaderConfig = {
     let mut config = BootloaderConfig::new_default();
@@ -85,50 +85,62 @@ fn main(boot_info: &'static mut BootInfo) -> ! {
 
     interrupts::enable();
 
-    // Switch to user mode
-    unsafe {
-        use core::alloc::Layout;
-        use core::ptr;
+    // Create user tasks
+    serial_println!("Creating user tasks...");
 
-        // Allocate 1 page (4KiB) for user stack, aligned to 4KiB
-        let stack_layout = Layout::from_size_align(4096, 4096).unwrap();
-        let stack_ptr = alloc::alloc::alloc(stack_layout);
-        if stack_ptr.is_null() {
-            panic!("Failed to allocate stack for user task");
-        }
-        // Stack grows down, so top is end of allocation
-        let stack_top = stack_ptr.add(stack_layout.size());
+    // Get the user entry code bytes (we'll copy this to each task)
+    let user_code_1: &[u8] = &USER_TASK_1_CODE;
+    let user_code_2: &[u8] = &USER_TASK_2_CODE;
+    let user_code_3: &[u8] = &USER_TASK_3_CODE;
 
-        // Allocate 1 page for user code
-        let code_layout = Layout::from_size_align(4096, 4096).unwrap();
-        let code_ptr = alloc::alloc::alloc(code_layout);
-        if code_ptr.is_null() {
-            panic!("Failed to allocate code page for user task");
-        }
+    {
+        let mut scheduler = SCHEDULER.lock();
 
-        // Copy the user_entry function to the user code page
-        // We copy a fixed size that should be enough for our simple loop
-        let user_fn_ptr = user_entry as *const u8;
-        ptr::copy_nonoverlapping(user_fn_ptr, code_ptr, 64);
+        // Create 3 user tasks
+        let task1 = unsafe { Task::new(user_code_1, &mut mapper) };
+        serial_println!("  Task {} created", task1.id);
+        scheduler.add_task(task1);
 
-        // Mark the stack page as user-accessible (writable, not executable)
-        // We need to set USER_ACCESSIBLE on all levels of the page table hierarchy
-        let stack_page: Page<Size4KiB> = Page::containing_address(VirtAddr::new(stack_ptr as u64));
-        set_page_user_accessible(&mut mapper, stack_page, true, false);
+        let task2 = unsafe { Task::new(user_code_2, &mut mapper) };
+        serial_println!("  Task {} created", task2.id);
+        scheduler.add_task(task2);
 
-        // Mark the code page as user-accessible (executable, not writable)
-        let code_page: Page<Size4KiB> = Page::containing_address(VirtAddr::new(code_ptr as u64));
-        set_page_user_accessible(&mut mapper, code_page, false, true);
+        let task3 = unsafe { Task::new(user_code_3, &mut mapper) };
+        serial_println!("  Task {} created", task3.id);
+        scheduler.add_task(task3);
 
-        serial_println!("Switching to user mode...");
-        serial_println!("  User code at: {:p}", code_ptr);
-        serial_println!("  User stack top at: {:p}", stack_top);
+        serial_println!("Total tasks: {}", scheduler.task_count());
 
-        enter_user_mode(code_ptr as usize, stack_top as usize);
+        // Start the scheduler
+        scheduler.start();
     }
 
-    // kernel::drivers::exit::exit_qemu(kernel::drivers::exit::QemuExitCode::Success);
+    serial_println!("Switching to first task...");
+
+    // Switch to the first task (never returns)
+    unsafe {
+        switch_to_first_task();
+    }
 }
+
+// User task code - simple infinite loops
+// Task 1: just spins with pause
+static USER_TASK_1_CODE: [u8; 4] = [
+    0xF3, 0x90, // pause
+    0xEB, 0xFC, // jmp -4 (back to pause)
+];
+
+// Task 2: same as task 1
+static USER_TASK_2_CODE: [u8; 4] = [
+    0xF3, 0x90, // pause
+    0xEB, 0xFC, // jmp -4
+];
+
+// Task 3: same as task 1
+static USER_TASK_3_CODE: [u8; 4] = [
+    0xF3, 0x90, // pause
+    0xEB, 0xFC, // jmp -4
+];
 
 #[cfg(not(test))]
 #[panic_handler]
@@ -137,144 +149,4 @@ fn panic(info: &PanicInfo) -> ! {
     serial_println!("Error: {}\n", info);
 
     kernel::drivers::exit::exit_qemu(kernel::drivers::exit::QemuExitCode::Failed);
-}
-
-/// Set USER_ACCESSIBLE flag on all page table levels for a given page
-/// This is needed because x86_64 requires the flag at ALL levels (PML4, PDPT, PD, PT)
-/// Handles both 4KiB pages and 2MiB huge pages
-unsafe fn set_page_user_accessible(
-    mapper: &mut x86_64::structures::paging::OffsetPageTable,
-    page: Page<Size4KiB>,
-    writable: bool,
-    executable: bool,
-) {
-    use x86_64::registers::control::Cr3;
-    use x86_64::structures::paging::PageTable;
-
-    let virt = page.start_address();
-    let phys_offset = mapper.phys_offset();
-
-    // Get the level 4 table
-    let (l4_frame, _) = Cr3::read();
-    let l4_table: &mut PageTable =
-        unsafe { &mut *(phys_offset + l4_frame.start_address().as_u64()).as_mut_ptr() };
-
-    // Level 4 entry
-    let l4_entry = &mut l4_table[virt.p4_index()];
-    l4_entry.set_flags(l4_entry.flags() | PageTableFlags::USER_ACCESSIBLE);
-
-    // Level 3 table
-    let l3_frame = l4_entry.frame().expect("L4 entry not present");
-    let l3_table: &mut PageTable =
-        unsafe { &mut *(phys_offset + l3_frame.start_address().as_u64()).as_mut_ptr() };
-    let l3_entry = &mut l3_table[virt.p3_index()];
-    l3_entry.set_flags(l3_entry.flags() | PageTableFlags::USER_ACCESSIBLE);
-
-    // Level 2 table
-    let l2_frame = l3_entry.frame().expect("L3 entry not present");
-    let l2_table: &mut PageTable =
-        unsafe { &mut *(phys_offset + l2_frame.start_address().as_u64()).as_mut_ptr() };
-    let l2_entry = &mut l2_table[virt.p2_index()];
-
-    // Check if this is a huge page (2MiB)
-    if l2_entry.flags().contains(PageTableFlags::HUGE_PAGE) {
-        // For huge pages, just set USER_ACCESSIBLE at L2 level
-        let mut new_flags = l2_entry.flags() | PageTableFlags::USER_ACCESSIBLE;
-        if writable {
-            new_flags |= PageTableFlags::WRITABLE;
-        }
-        if executable {
-            // Remove NO_EXECUTE flag if we want this page to be executable
-            new_flags &= !PageTableFlags::NO_EXECUTE;
-        }
-        l2_entry.set_flags(new_flags);
-    } else {
-        // Normal 4KiB page - set flag at L2 and L1
-        l2_entry.set_flags(l2_entry.flags() | PageTableFlags::USER_ACCESSIBLE);
-
-        // Level 1 table (final page table entry)
-        let l1_frame = l2_entry.frame().expect("L2 entry not present");
-        let l1_table: &mut PageTable =
-            unsafe { &mut *(phys_offset + l1_frame.start_address().as_u64()).as_mut_ptr() };
-        let l1_entry = &mut l1_table[virt.p1_index()];
-
-        let mut new_flags = l1_entry.flags() | PageTableFlags::USER_ACCESSIBLE;
-        if writable {
-            new_flags |= PageTableFlags::WRITABLE;
-        }
-        if executable {
-            // Remove NO_EXECUTE flag if we want this page to be executable
-            new_flags &= !PageTableFlags::NO_EXECUTE;
-        }
-        l1_entry.set_flags(new_flags);
-    }
-
-    // Flush the TLB for this page
-    x86_64::instructions::tlb::flush(virt);
-}
-
-// NOTE: This function never returns
-// It is the entry point for the user mode task
-// Using naked function to ensure position-independent code
-#[unsafe(naked)]
-extern "C" fn user_entry() {
-    // Simple infinite loop in assembly - completely position independent
-    core::arch::naked_asm!(
-        "2:", "pause",  // Hint to the CPU that we're spinning
-        "jmp 2b", // Jump back to the label
-    );
-}
-
-// Context switch to user mode
-unsafe fn enter_user_mode(entry_point: usize, stack_pointer: usize) -> ! {
-    use core::arch::asm;
-    use kernel::gdt::GDT;
-    use kernel::serial_println;
-    use x86_64::registers::rflags::RFlags;
-
-    // 1. Get User Selectors from GDT
-    // Code Selector with RPL 3
-    let user_code = (GDT.1.user_code.0 | 3) as u64;
-    // Data Selector with RPL 3
-    let user_data = (GDT.1.user_data.0 | 3) as u64;
-
-    serial_println!("  User code selector: {:#x}", user_code);
-    serial_println!("  User data selector: {:#x}", user_data);
-    serial_println!("  Entry point: {:#x}", entry_point);
-    serial_println!("  Stack pointer: {:#x}", stack_pointer);
-
-    // 2. Enable Interrupts (IF bit) in RFLAGS so we can still handle timer/keyboard
-    let rflags = RFlags::INTERRUPT_FLAG.bits();
-
-    // 3. Prepare the stack frame for 'iretq'
-    // IRETQ expects: SS, RSP, RFLAGS, CS, RIP
-    // We also need to set DS/ES/FS/GS to user data segment
-
-    unsafe {
-        asm!(
-            // Clear data segments to user data selector
-            "mov ds, {ds:x}",
-            "mov es, {ds:x}",
-            "mov fs, {ds:x}",
-            "mov gs, {ds:x}",
-
-            // Push IRETQ frame
-            "push {ss}",           // SS
-            "push {rsp}",          // RSP
-            "push {rflags}",       // RFLAGS
-            "push {cs}",           // CS
-            "push {rip}",          // RIP
-
-            // Go!
-            "iretq",
-
-            ds = in(reg) user_data,
-            ss = in(reg) user_data,
-            rsp = in(reg) stack_pointer,
-            rflags = in(reg) rflags,
-            cs = in(reg) user_code,
-            rip = in(reg) entry_point,
-            options(noreturn)
-        );
-    }
 }
