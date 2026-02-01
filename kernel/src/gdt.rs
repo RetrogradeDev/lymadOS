@@ -14,8 +14,6 @@ pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
 pub const PAGE_FAULT_IST_INDEX: u16 = 1;
 pub const GENERAL_PROTECTION_FAULT_IST_INDEX: u16 = 2;
 
-const BOOT_STACK_TOP: VirtAddr = VirtAddr::new((0x8e0000 + STACK_SIZE as u64) - 16);
-
 pub static TSS: Lazy<TaskStateSegment> = Lazy::new(|| {
     let mut tss = TaskStateSegment::new();
 
@@ -46,17 +44,25 @@ pub static TSS: Lazy<TaskStateSegment> = Lazy::new(|| {
         stack_end
     };
 
-    tss.privilege_stack_table[0] = BOOT_STACK_TOP;
+    // RSP0: Stack to use when switching from Ring 3 to Ring 0
+    // Point to the top of our statically allocated kernel stack
+    tss.privilege_stack_table[0] = {
+        static mut KERNEL_STACK: [u8; STACK_SIZE] = [0; STACK_SIZE]; // TODO: Do something better here
+
+        let stack_start = VirtAddr::from_ptr(&raw const KERNEL_STACK);
+        let stack_end = stack_start + STACK_SIZE as u64;
+        stack_end
+    };
 
     tss
 });
 
 pub struct Selectors {
-    code: SegmentSelector,
-    data: SegmentSelector,
-    user_code: SegmentSelector,
-    user_data: SegmentSelector,
-    tss: SegmentSelector,
+    pub code: SegmentSelector,
+    pub data: SegmentSelector,
+    pub user_code: SegmentSelector,
+    pub user_data: SegmentSelector,
+    pub tss: SegmentSelector,
 }
 
 pub static GDT: Lazy<(GlobalDescriptorTable, Selectors)> = Lazy::new(|| {
