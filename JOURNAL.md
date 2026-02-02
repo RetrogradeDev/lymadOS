@@ -26,3 +26,6 @@ I spent WAY too long debugging keyboard interrupts today. Turns out QEMU doesn't
 I spent some time yesterday and today implementing a very basic event system. It ended up being just a global ArrayQueue, but it works fine for now. Next step is fixing mouse interrupts.
 
 Alright, I spent 30 minutes figuring our how to enable the mouse by sending data over the ports, and then realised "ps2-mouse", the crate I ended up using to decode the mouse packets, already has an init function that does exactly that. We can now read mouse packets and add their states to the event queue. Next step is to implement a either a basic way of writing stuff to the screen, or the userland.
+
+# 2/2/2026 3h (today and yesterday combined)
+I spent some time yesterday and today implementing a basic userland switching, state saving and loading and syscalls. It was a bit tricky, but I think I got it working. I will first test it a bit more before writing about it in detail. After that, I'll think really hard about a good design for driver and syscall handling. I was thinking about making it really modular, so drivers can specify what other drivers they depend on, and subscribe and push events.
