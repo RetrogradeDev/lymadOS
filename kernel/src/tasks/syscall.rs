@@ -26,6 +26,11 @@ struct SyscallStack([u8; SYSCALL_STACK_SIZE]);
 #[unsafe(no_mangle)]
 static mut SYSCALL_KERNEL_STACK: SyscallStack = SyscallStack([0; SYSCALL_STACK_SIZE]);
 
+/// Temporary storage for user RSP during syscall entry
+/// Needed because we can't use any registers as scratch without clobbering syscall args
+#[unsafe(no_mangle)]
+static mut USER_RSP_TEMP: u64 = 0;
+
 pub fn init_syscalls() {
     // First, enable the necessary CPU features for syscalls
     unsafe {
@@ -128,50 +133,68 @@ pub fn init_syscalls() {
 /// Syscall entry point - called when a syscall is invoked from user mode
 ///
 /// On entry (from syscall instruction):
+///   RAX = syscall number
+///   RDI = arg1, RSI = arg2, RDX = arg3, R10 = arg4, R8 = arg5, R9 = arg6
 ///   RCX = return RIP (user's next instruction)
 ///   R11 = saved RFLAGS
 ///   RSP = user stack (NOT changed by syscall!)
 ///   
 /// We must:
-///   1. Switch to kernel stack
-///   2. Save user RSP
-///   3. Save registers
+///   1. Save user RSP to a temp location
+///   2. Switch to kernel stack
+///   3. Save RCX, R11, and args
 ///   4. Call the actual handler
 ///   5. Restore everything and sysretq
 #[unsafe(naked)]
 extern "C" fn syscall_handler() {
     naked_asm!(
         // At this point we're on the USER stack - dangerous!
-        // RCX = return address, R11 = saved rflags
+        // We need to switch stacks WITHOUT clobbering syscall arguments or critical regs
+        // Syscall args: rdi, rsi, rdx, r10, r8, r9 (and rax = syscall number)
+        // Critical for sysret: rcx = return RIP, r11 = saved RFLAGS
 
-        // Save user RSP in a scratch register
-        "mov r10, rsp",
+        // Save user RSP to our temp variable (RIP-relative for PIE)
+        "mov [rip + {user_rsp_temp}], rsp",
 
         // Load kernel stack using RIP-relative addressing for PIE compatibility
         "lea rsp, [rip + {kernel_stack} + {stack_size}]",
 
-        // Now we're on kernel stack - safe to push
-        // Save the user stack pointer
-        "push r10",
+        // Now we're on kernel stack - save everything
+        // First save RCX and R11 since we need them for sysret
+        "push rcx",         // return RIP
+        "push r11",         // saved RFLAGS
 
-        // Save RCX (return RIP) and R11 (saved RFLAGS) - critical for sysretq!
-        "push rcx",
+        // Push user RSP (need to use a scratch register since push [rip+x] is tricky)
+        // We can safely use r11 now since we already saved it
+        "mov r11, [rip + {user_rsp_temp}]",
         "push r11",
 
-        // Save caller-saved registers per System V ABI
-        "push rax",
-        "push rdi",
-        "push rsi",
-        "push rdx",
-        "push r8",
-        "push r9",
+        // Save syscall arguments and number
+        "push rax",         // syscall number
+        "push rdi",         // arg1
+        "push rsi",         // arg2
+        "push rdx",         // arg3
+        "push r10",         // arg4
+        "push r8",          // arg5
+        "push r9",          // arg6
 
         // Enable interrupts now that we're on a safe stack
         "sti",
 
-        // Call the actual syscall handler
-        // Syscall number is in rax, pass as first arg
-        "mov rdi, rax",
+        // Set up arguments for syscall_entry according to System V ABI:
+        // syscall_entry(syscall_num, arg1, arg2, arg3, arg4, arg5)
+        // TODO: arg6
+        //
+        // Stack layout: [rsp+0]=r9, [rsp+8]=r8, [rsp+16]=r10, [rsp+24]=rdx,
+        //               [rsp+32]=rsi, [rsp+40]=rdi, [rsp+48]=rax,
+        //               [rsp+56]=user_rsp, [rsp+64]=r11, [rsp+72]=rcx
+        "mov rdi, [rsp + 48]",  // syscall_num = saved rax
+        "mov rsi, [rsp + 40]",  // arg1 = saved rdi
+        "mov rdx, [rsp + 32]",  // arg2 = saved rsi
+        "mov rcx, [rsp + 24]",  // arg3 = saved rdx
+        "mov r8,  [rsp + 16]",  // arg4 = saved r10
+        "mov r9,  [rsp + 8]",   // arg5 = saved r8
+
         "lea rax, [rip + {syscall_entry}]",
         "call rax",
 
@@ -180,20 +203,19 @@ extern "C" fn syscall_handler() {
         // Disable interrupts for sysret
         "cli",
 
-        // Restore caller-saved registers (skip rax - it has return value)
-        "pop r9",
-        "pop r8",
-        "pop rdx",
-        "pop rsi",
-        "pop rdi",
-        "add rsp, 8",       // skip saved rax
+        // Pop saved argument registers (we don't need to restore them)
+        "add rsp, 56",      // skip r9, r8, r10, rdx, rsi, rdi, rax (7 * 8 = 56)
 
-        // Restore R11 (rflags) and RCX (return address)
-        "pop r11",
-        "pop rcx",
-
-        // Restore user RSP
-        "pop rsp",
+        // After add rsp, 56 the stack looks like:
+        // [rsp+0]  = user_rsp
+        // [rsp+8]  = r11 (saved RFLAGS)
+        // [rsp+16] = rcx (return RIP)
+        //
+        // IMPORTANT: Must load r11/rcx BEFORE switching RSP, otherwise
+        // we lose access to the kernel stack!
+        "mov r11, [rsp + 8]",   // restore RFLAGS
+        "mov rcx, [rsp + 16]",  // restore return RIP
+        "mov rsp, [rsp]",       // restore user RSP (do this LAST)
 
         // Return to user mode
         "sysretq",
@@ -201,16 +223,34 @@ extern "C" fn syscall_handler() {
         kernel_stack = sym SYSCALL_KERNEL_STACK,
         stack_size = const SYSCALL_STACK_SIZE,
         syscall_entry = sym syscall_entry,
+        user_rsp_temp = sym USER_RSP_TEMP,
     );
 }
 
 /// Actual syscall handler - called by syscall_handler after saving context
-/// Arguments:
-///     rdi: syscall number (was in rax)
+///
+/// Arguments (remapped from syscall convention to System V ABI):
+///     syscall_num: syscall number (was in rax)
+///     arg1-arg5: syscall arguments (were in rdi, rsi, rdx, r10, r8)
 /// Returns:
 ///     rax: return value
-extern "C" fn syscall_entry(syscall_num: u64) -> u64 {
-    serial_println!("Syscall invoked: number={}", syscall_num);
+extern "C" fn syscall_entry(
+    syscall_num: u64,
+    arg1: u64,
+    arg2: u64,
+    arg3: u64,
+    arg4: u64,
+    arg5: u64,
+) -> u64 {
+    serial_println!(
+        "Syscall invoked: num={}, args=[{:#x}, {:#x}, {:#x}, {:#x}, {:#x}]",
+        syscall_num,
+        arg1,
+        arg2,
+        arg3,
+        arg4,
+        arg5
+    );
 
     // For now, just return 0
     0

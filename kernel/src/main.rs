@@ -136,12 +136,20 @@ static USER_TASK_2_CODE: [u8; 4] = [
     0xEB, 0xFC, // jmp -4
 ];
 
-// Task 3: Make a syscall, then loop
-// syscall instruction is 0x0F 0x05
-static USER_TASK_3_CODE: [u8; 6] = [
-    0x0F, 0x05, // syscall
-    0xF3, 0x90, // pause
-    0xEB, 0xFC, // jmp -4
+// Task 3: Make a syscall with arguments, then loop
+// Sets up: rax=42 (syscall num), rdi=1, rsi=2
+// Total bytes: 7 + 7 + 7 + 2 + 2 + 2 = 27
+// Jump is at byte 25, ends at byte 27. To jump to byte 0: -27 = 0xE5
+static USER_TASK_3_CODE: [u8; 27] = [
+    // mov rax, 42  (syscall number) - 7 bytes, offset 0-6
+    0x48, 0xC7, 0xC0, 0x2A, 0x00, 0x00, 0x00,
+    // mov rdi, 1   (arg1) - 7 bytes, offset 7-13
+    0x48, 0xC7, 0xC7, 0x01, 0x00, 0x00, 0x00,
+    // mov rsi, 2   (arg2) - 7 bytes, offset 14-20
+    0x48, 0xC7, 0xC6, 0x02, 0x00, 0x00, 0x00, // syscall - 2 bytes, offset 21-22
+    0x0F, 0x05, // pause - 2 bytes, offset 23-24
+    0xF3, 0x90, // jmp back to start - 2 bytes, offset 25-26
+    0xEB, 0xE5,
 ];
 
 #[cfg(not(test))]
