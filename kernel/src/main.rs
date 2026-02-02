@@ -136,8 +136,10 @@ static USER_TASK_2_CODE: [u8; 4] = [
     0xEB, 0xFC, // jmp -4
 ];
 
-// Task 3: same as task 1
-static USER_TASK_3_CODE: [u8; 4] = [
+// Task 3: Make a syscall, then loop
+// syscall instruction is 0x0F 0x05
+static USER_TASK_3_CODE: [u8; 6] = [
+    0x0F, 0x05, // syscall
     0xF3, 0x90, // pause
     0xEB, 0xFC, // jmp -4
 ];

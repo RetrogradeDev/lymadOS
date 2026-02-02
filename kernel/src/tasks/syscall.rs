@@ -14,7 +14,7 @@ use x86_64::{
     },
 };
 
-use crate::{gdt::GDT, serial_println};
+use crate::{drivers::serial, gdt::GDT, serial_println};
 
 pub fn init_syscalls() {
     // First, enable the necessary CPU features for syscalls
@@ -69,7 +69,7 @@ pub fn init_syscalls() {
             *efer |= EferFlags::SYSTEM_CALL_EXTENSIONS; // enable syscall/sysret instructions
         });
 
-        LStar::write(VirtAddr::new(syscall_entry as u64)); // set syscall entry point
+        LStar::write(VirtAddr::new(syscall_handler as u64)); // set syscall entry point
 
         SFMask::write(RFlags::INTERRUPT_FLAG); // enable interrupts on syscall entry
 
@@ -94,11 +94,58 @@ pub fn init_syscalls() {
 /// Syscall entry point - called when a syscall is invoked from user mode
 /// This is a naked function that saves all registers, calls syscall_handler,
 /// then restores registers and returns via iretq
-// #[unsafe(naked)]
-pub extern "C" fn syscall_entry() {
-    serial_println!("Syscall entry called");
+#[unsafe(naked)]
+extern "C" fn syscall_handler() {
+    naked_asm!(
+        // save context, see x86_64 ABI
+        "push rcx",
+        "push rdx",
+        "push rsi",
+        "push rdi",
+        "push r8",
+        "push r9",
+        "push r10",
+        "push r11",
+        // copy 4th argument to rcx to adhere x86_64 ABI
+        "mov rcx, r10",
+        "sti",
+        // Call the actual syscall handler
+        "call {syscall_entry}",
+        // restore context, see x86_64 ABI
+        "cli",
+        "pop r11",
+        "pop r10",
+        "pop r9",
+        "pop r8",
+        "pop rdi",
+        "pop rsi",
+        "pop rdx",
+        "pop rcx",
+        "sysretq",
 
-    // TODO: Implement syscall handling logic here
-    // Just crash for now
-    panic!("Syscall handling not implemented yet");
+        syscall_entry = sym syscall_entry,
+    );
+}
+
+/// Actual syscall handler - called by syscall_handler after saving context
+/// Arguments:
+///     rdi: syscall number
+///     rsi: first argument
+///     rdx: second argument
+///     rcx: third argument
+///     r10: fourth argument
+/// Returns:
+///     rax: return value
+extern "C" fn syscall_entry(rdi: u64, rsi: u64, rdx: u64, rcx: u64, r10: u64) -> u64 {
+    serial_println!(
+        "Syscall invoked: number={}, arg1={}, arg2={}, arg3={}, arg4={}",
+        rdi,
+        rsi,
+        rdx,
+        rcx,
+        r10
+    );
+
+    // For now, just return 0
+    0
 }
