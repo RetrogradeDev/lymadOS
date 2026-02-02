@@ -1,6 +1,6 @@
 // Syscall handling
 //
-// Intizalizes the necessary syscall infrastructure and handles and distributes syscalls
+// Initializes the necessary syscall infrastructure and handles and distributes syscalls
 
 use core::arch::naked_asm;
 
@@ -9,12 +9,22 @@ use x86_64::{
     VirtAddr,
     registers::{
         control::{Cr0, Cr0Flags, Cr4, Cr4Flags, Efer, EferFlags},
-        model_specific::{LStar, SFMask, Star},
+        model_specific::{LStar, Msr, SFMask},
         rflags::RFlags,
     },
 };
 
-use crate::{drivers::serial, gdt::GDT, serial_println};
+use crate::{gdt::GDT, serial_println};
+
+const SYSCALL_STACK_SIZE: usize = 4096 * 4; // 16 KiB
+
+/// Kernel stack for syscall handler
+/// We need a dedicated stack because syscall does NOT switch RSP automatically
+#[repr(C, align(16))]
+struct SyscallStack([u8; SYSCALL_STACK_SIZE]);
+
+#[unsafe(no_mangle)]
+static mut SYSCALL_KERNEL_STACK: SyscallStack = SyscallStack([0; SYSCALL_STACK_SIZE]);
 
 pub fn init_syscalls() {
     // First, enable the necessary CPU features for syscalls
@@ -71,80 +81,136 @@ pub fn init_syscalls() {
 
         LStar::write(VirtAddr::new(syscall_handler as u64)); // set syscall entry point
 
-        SFMask::write(RFlags::INTERRUPT_FLAG); // enable interrupts on syscall entry
+        SFMask::write(RFlags::INTERRUPT_FLAG); // mask interrupts on syscall entry (clear IF)
 
-        // Set up code segment selectors for syscall/sysret
-        let cs_sysret = GDT.1.user_code; // RPL 3
-        let ss_sysret = GDT.1.user_data; // RPL 3
-        let cs_syscall = GDT.1.code; // RPL 0
-        let ss_syscall = GDT.1.data; // RPL 0
+        // Set up code segment selectors for syscall/sysret using raw MSR write cuz the Star::write acts weird
+        // STAR MSR (0xC0000081) layout:
+        //   Bits 31:0  = Reserved (should be 0)
+        //   Bits 47:32 = SYSCALL CS (kernel code segment, SS = CS+8)
+        //   Bits 63:48 = SYSRET base (64-bit CS = base+16, SS = base+8)
+        //
+        // Our GDT layout:
+        //   0x08 = kernel_code
+        //   0x10 = kernel_data
+        //   0x18 = user_data (0x1B with RPL=3)
+        //   0x20 = user_code (0x23 with RPL=3)
+        //
+        // For SYSCALL: CS=0x08, SS=0x10 (kernel_data at CS+8)
+        // For SYSRET 64-bit: base=0x10, so CS=0x10+16=0x20, SS=0x10+8=0x18
+        //
+        // STAR value = (sysret_base << 48) | (syscall_cs << 32)
+        //            = (0x10 << 48) | (0x08 << 32)
 
-        // For some stupid reason do we need to switch the order of cs and ss_sysret cuz we else get an error even tho the docs say otherwise
-        // TODO: figure out why
-        match Star::write(ss_sysret, cs_sysret, cs_syscall, ss_syscall) {
-            Ok(_) => {}
-            Err(e) => {
-                serial_println!("Failed to write STAR register: {:?}", e);
-                panic!("Failed to write STAR register");
-            }
-        }
+        let syscall_cs: u64 = GDT.1.code.0 as u64; // 0x08
+        let sysret_base: u64 = (GDT.1.user_data.0 & !3) as u64 - 8; // 0x18 - 8 = 0x10
+
+        serial_println!("Setting up STAR register:");
+        serial_println!("  Kernel CS (SYSCALL): {:#x}", syscall_cs);
+        serial_println!("  SYSRET base: {:#x}", sysret_base);
+        serial_println!("  SYSRET CS will be: {:#x}", sysret_base + 16);
+        serial_println!("  SYSRET SS will be: {:#x}", sysret_base + 8);
+
+        let star_value = (sysret_base << 48) | (syscall_cs << 32);
+        serial_println!("  STAR value: {:#x}", star_value);
+
+        // Write to STAR MSR (0xC0000081)
+        const STAR_MSR: u32 = 0xC0000081;
+        let mut star_msr = Msr::new(STAR_MSR);
+        star_msr.write(star_value);
+
+        serial_println!(
+            "Syscall initialized, handler at {:#x}",
+            syscall_handler as u64
+        );
     }
 }
 
 /// Syscall entry point - called when a syscall is invoked from user mode
-/// This is a naked function that saves all registers, calls syscall_handler,
-/// then restores registers and returns via iretq
+///
+/// On entry (from syscall instruction):
+///   RCX = return RIP (user's next instruction)
+///   R11 = saved RFLAGS
+///   RSP = user stack (NOT changed by syscall!)
+///   
+/// We must:
+///   1. Switch to kernel stack
+///   2. Save user RSP
+///   3. Save registers
+///   4. Call the actual handler
+///   5. Restore everything and sysretq
 #[unsafe(naked)]
 extern "C" fn syscall_handler() {
     naked_asm!(
-        // save context, see x86_64 ABI
+        // At this point we're on the USER stack - dangerous!
+        // RCX = return address, R11 = saved rflags
+
+        // Save user RSP in a scratch register
+        "mov r10, rsp",
+
+        // Load kernel stack using RIP-relative addressing for PIE compatibility
+        "lea rsp, [rip + {kernel_stack} + {stack_size}]",
+
+        // Now we're on kernel stack - safe to push
+        // Save the user stack pointer
+        "push r10",
+
+        // Save RCX (return RIP) and R11 (saved RFLAGS) - critical for sysretq!
         "push rcx",
-        "push rdx",
-        "push rsi",
+        "push r11",
+
+        // Save caller-saved registers per System V ABI
+        "push rax",
         "push rdi",
+        "push rsi",
+        "push rdx",
         "push r8",
         "push r9",
-        "push r10",
-        "push r11",
-        // copy 4th argument to rcx to adhere x86_64 ABI
-        "mov rcx, r10",
+
+        // Enable interrupts now that we're on a safe stack
         "sti",
+
         // Call the actual syscall handler
-        "call {syscall_entry}",
-        // restore context, see x86_64 ABI
+        // Syscall number is in rax, pass as first arg
+        "mov rdi, rax",
+        "lea rax, [rip + {syscall_entry}]",
+        "call rax",
+
+        // Return value is in RAX - leave it there
+
+        // Disable interrupts for sysret
         "cli",
-        "pop r11",
-        "pop r10",
+
+        // Restore caller-saved registers (skip rax - it has return value)
         "pop r9",
         "pop r8",
-        "pop rdi",
-        "pop rsi",
         "pop rdx",
+        "pop rsi",
+        "pop rdi",
+        "add rsp, 8",       // skip saved rax
+
+        // Restore R11 (rflags) and RCX (return address)
+        "pop r11",
         "pop rcx",
+
+        // Restore user RSP
+        "pop rsp",
+
+        // Return to user mode
         "sysretq",
 
+        kernel_stack = sym SYSCALL_KERNEL_STACK,
+        stack_size = const SYSCALL_STACK_SIZE,
         syscall_entry = sym syscall_entry,
     );
 }
 
 /// Actual syscall handler - called by syscall_handler after saving context
 /// Arguments:
-///     rdi: syscall number
-///     rsi: first argument
-///     rdx: second argument
-///     rcx: third argument
-///     r10: fourth argument
+///     rdi: syscall number (was in rax)
 /// Returns:
 ///     rax: return value
-extern "C" fn syscall_entry(rdi: u64, rsi: u64, rdx: u64, rcx: u64, r10: u64) -> u64 {
-    serial_println!(
-        "Syscall invoked: number={}, arg1={}, arg2={}, arg3={}, arg4={}",
-        rdi,
-        rsi,
-        rdx,
-        rcx,
-        r10
-    );
+extern "C" fn syscall_entry(syscall_num: u64) -> u64 {
+    serial_println!("Syscall invoked: number={}", syscall_num);
 
     // For now, just return 0
     0
