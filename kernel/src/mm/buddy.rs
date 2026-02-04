@@ -1,5 +1,7 @@
 use core::ptr::NonNull;
 
+use x86_64::structures::paging::{FrameAllocator, PhysFrame, Size4KiB};
+
 const MAX_ORDER: usize = 12;
 const PAGE_SIZE: usize = 4096;
 // 1GB RAM / 4KiB pages = 262,144 pages
@@ -212,3 +214,12 @@ impl BuddyAllocator {
 }
 
 unsafe impl Send for BuddyAllocator {}
+
+unsafe impl FrameAllocator<Size4KiB> for BuddyAllocator {
+    fn allocate_frame(&mut self) -> Option<PhysFrame<Size4KiB>> {
+        unsafe { self.alloc(0) }.map(|ptr| {
+            let phys_addr = (ptr as usize - self.offset) as u64;
+            PhysFrame::containing_address(x86_64::PhysAddr::new(phys_addr))
+        })
+    }
+}

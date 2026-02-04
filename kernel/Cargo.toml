@@ -13,6 +13,7 @@ spin = "0.10.0"
 uart_16550 = "0.4.0"
 x86_64 = "0.15.4"
 raw-cpuid = "11.6.0"
+goblin = { version = "0.10.4", default-features = false, features = ["elf64", "elf32", "endian_fd", "alloc"] }
 
 [features]
 no_global_allocator = []

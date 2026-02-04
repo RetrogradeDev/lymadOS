@@ -14,6 +14,7 @@ use spin::Mutex;
 
 use crate::gdt::GDT;
 
+mod elf;
 pub mod switch;
 pub mod syscall;
 
