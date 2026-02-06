@@ -11,10 +11,14 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, Ordering};
 use spin::Mutex;
+use x86_64::{
+    VirtAddr,
+    structures::paging::{FrameAllocator, OffsetPageTable, Size4KiB},
+};
 
-use crate::gdt::GDT;
+use crate::{gdt::GDT, serial_println};
 
-mod elf;
+pub mod elf;
 pub mod switch;
 pub mod syscall;
 
@@ -170,6 +174,57 @@ impl Task {
             kernel_stack,
             _code_page: code_page,
         }
+    }
+
+    /// Create a new task from an ELF binary
+    ///
+    /// Loads the ELF into memory at its specified virtual addresses,
+    /// allocates a user stack, and creates the task context.
+    pub unsafe fn from_elf(
+        elf_data: &[u8],
+        mapper: &mut OffsetPageTable,
+        frame_allocator: &mut impl FrameAllocator<Size4KiB>,
+        phys_mem_offset: VirtAddr,
+    ) -> Result<Self, elf::Error> {
+        serial_println!("from_elf: starting, elf_data len={}", elf_data.len());
+        let id = NEXT_TASK_ID.fetch_add(1, Ordering::SeqCst);
+        serial_println!("from_elf: id={}", id);
+
+        // Load ELF and allocate user stack
+        serial_println!("from_elf: calling load_elf...");
+        let elf::ElfLoadResult {
+            entry_point,
+            stack_top,
+        } = elf::load_elf(elf_data, mapper, frame_allocator, phys_mem_offset)?;
+
+        serial_println!(
+            "from_elf: load_elf returned entry=0x{:x}, stack=0x{:x}",
+            entry_point,
+            stack_top
+        );
+
+        // Allocate kernel stack for this task (used during interrupts)
+        // TODO: Consider something better
+        let kernel_stack = Box::new([0u8; KERNEL_STACK_SIZE]);
+
+        // We don't need the heap-based user stack or code page for ELF tasks
+        // since they're mapped at fixed virtual addresses.
+        // But we need placeholders to satisfy the struct.
+        // TODO: Fix this
+        let user_stack = Box::new([0u8; USER_STACK_SIZE]);
+        let code_page = Box::new([0u8; 4096]);
+
+        // Create context with ELF entry point and mapped stack
+        let context = TaskContext::new_user(entry_point, stack_top);
+
+        Ok(Task {
+            id,
+            state: TaskState::Ready,
+            context,
+            _user_stack: user_stack,
+            kernel_stack,
+            _code_page: code_page,
+        })
     }
 
     /// Get the top of this task's kernel stack

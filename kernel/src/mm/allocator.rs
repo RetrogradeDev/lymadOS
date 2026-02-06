@@ -3,6 +3,7 @@ use crate::mm::slub::{PAGE_SIZE, PageProvider, SCache};
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr;
 use spin::Mutex;
+use x86_64::structures::paging::{PhysFrame, Size4KiB};
 
 pub struct GlobalPageAllocator {
     frame_allocator: BuddyAllocator,
@@ -148,5 +149,18 @@ pub fn add_frame(start: *mut u8) {
     let mut provider = PAGE_ALLOCATOR.lock();
     if let Some(p) = provider.as_mut() {
         unsafe { p.frame_allocator.add_frame(start) };
+    }
+}
+
+/// Allocate a physical frame from the buddy allocator
+/// Returns the physical frame, or None if no frames are available
+pub fn allocate_frame() -> Option<PhysFrame<Size4KiB>> {
+    use x86_64::structures::paging::FrameAllocator;
+
+    let mut provider = PAGE_ALLOCATOR.lock();
+    if let Some(p) = provider.as_mut() {
+        p.frame_allocator.allocate_frame()
+    } else {
+        None
     }
 }

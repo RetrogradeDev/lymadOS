@@ -238,20 +238,26 @@ extern "C" fn syscall_entry(
     syscall_num: u64,
     arg1: u64,
     arg2: u64,
-    arg3: u64,
-    arg4: u64,
-    arg5: u64,
+    _arg3: u64,
+    _arg4: u64,
+    _arg5: u64,
 ) -> u64 {
-    serial_println!(
-        "Syscall invoked: num={}, args=[{:#x}, {:#x}, {:#x}, {:#x}, {:#x}]",
-        syscall_num,
-        arg1,
-        arg2,
-        arg3,
-        arg4,
-        arg5
-    );
+    match syscall_num {
+        // Syscall 1: write/print
+        // arg1 = fd (1 = stdout)
+        // arg2 = value to print
+        1 => {
+            if arg1 == 1 {
+                serial_println!("[user] print: {}", arg2);
+            }
 
-    // For now, just return 0
-    0
+            0
+        }
+
+        // Unknown syscall
+        _ => {
+            serial_println!("Unknown syscall: num={}", syscall_num);
+            u64::MAX // Return error
+        }
+    }
 }

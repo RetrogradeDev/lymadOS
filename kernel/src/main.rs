@@ -11,7 +11,7 @@ use core::panic::PanicInfo;
 use bootloader_api::{BootInfo, BootloaderConfig, config::Mapping, entry_point};
 
 use kernel::{
-    mm::{allocator, memory::BootInfoFrameAllocator},
+    mm::{allocator, memory::BootInfoFrameAllocator, user::BuddyFrameAllocator},
     serial_println,
     tasks::{SCHEDULER, Task, switch::switch_to_first_task},
 };
@@ -88,26 +88,46 @@ fn main(boot_info: &'static mut BootInfo) -> ! {
     // Create user tasks
     serial_println!("Creating user tasks...");
 
-    // Get the user entry code bytes (we'll copy this to each task)
+    // Embed the hello.elf binary at compile time
+    static HELLO_ELF: &[u8] = include_bytes!("resources/hello.elf");
+    serial_println!("Embedded hello.elf: {} bytes", HELLO_ELF.len());
+
+    // Use the buddy allocator for ELF loading
+    let mut buddy_frame_alloc = BuddyFrameAllocator;
+
+    serial_println!("About to load ELF...");
+
+    let elf_task = match unsafe {
+        Task::from_elf(
+            HELLO_ELF,
+            &mut mapper,
+            &mut buddy_frame_alloc,
+            phys_mem_offset,
+        )
+    } {
+        Ok(task) => task,
+        Err(e) => {
+            serial_println!("Failed to load ELF: {:?}", e);
+            panic!("ELF loading failed");
+        }
+    };
+
+    serial_println!(
+        "  ELF Task {} created (entry=0x{:x})",
+        elf_task.id,
+        elf_task.context.rip
+    );
+
+    // Also create a simple raw code task for comparison
     let user_code_1: &[u8] = &USER_TASK_1_CODE;
-    let user_code_2: &[u8] = &USER_TASK_2_CODE;
-    let user_code_3: &[u8] = &USER_TASK_3_CODE;
+    let task1 = unsafe { Task::new(user_code_1, &mut mapper) };
+    serial_println!("  Task {} created (raw code)", task1.id);
 
     {
         let mut scheduler = SCHEDULER.lock();
 
-        // Create 3 user tasks
-        let task1 = unsafe { Task::new(user_code_1, &mut mapper) };
-        serial_println!("  Task {} created", task1.id);
+        scheduler.add_task(elf_task);
         scheduler.add_task(task1);
-
-        let task2 = unsafe { Task::new(user_code_2, &mut mapper) };
-        serial_println!("  Task {} created", task2.id);
-        scheduler.add_task(task2);
-
-        let task3 = unsafe { Task::new(user_code_3, &mut mapper) };
-        serial_println!("  Task {} created", task3.id);
-        scheduler.add_task(task3);
 
         serial_println!("Total tasks: {}", scheduler.task_count());
 
@@ -128,28 +148,6 @@ fn main(boot_info: &'static mut BootInfo) -> ! {
 static USER_TASK_1_CODE: [u8; 4] = [
     0xF3, 0x90, // pause
     0xEB, 0xFC, // jmp -4 (back to pause)
-];
-
-// Task 2: same as task 1
-static USER_TASK_2_CODE: [u8; 4] = [
-    0xF3, 0x90, // pause
-    0xEB, 0xFC, // jmp -4
-];
-
-// Task 3: Make a syscall with arguments, then loop
-// Sets up: rax=42 (syscall num), rdi=1, rsi=2
-// Total bytes: 7 + 7 + 7 + 2 + 2 + 2 = 27
-// Jump is at byte 25, ends at byte 27. To jump to byte 0: -27 = 0xE5
-static USER_TASK_3_CODE: [u8; 27] = [
-    // mov rax, 42  (syscall number) - 7 bytes, offset 0-6
-    0x48, 0xC7, 0xC0, 0x2A, 0x00, 0x00, 0x00,
-    // mov rdi, 1   (arg1) - 7 bytes, offset 7-13
-    0x48, 0xC7, 0xC7, 0x01, 0x00, 0x00, 0x00,
-    // mov rsi, 2   (arg2) - 7 bytes, offset 14-20
-    0x48, 0xC7, 0xC6, 0x02, 0x00, 0x00, 0x00, // syscall - 2 bytes, offset 21-22
-    0x0F, 0x05, // pause - 2 bytes, offset 23-24
-    0xF3, 0x90, // jmp back to start - 2 bytes, offset 25-26
-    0xEB, 0xE5,
 ];
 
 #[cfg(not(test))]
