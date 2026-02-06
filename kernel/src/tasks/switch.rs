@@ -7,7 +7,7 @@ use core::arch::asm;
 
 use crate::drivers::apic::end_interrupt;
 use crate::serial_print;
-use crate::tasks::{SCHEDULER, TaskContext};
+use crate::tasks::{SCHEDULER, task::TaskContext};
 
 /// Pointer to where we should store the current RSP0 value for TSS updates
 /// This is set by the GDT module to point to the TSS's RSP0 field

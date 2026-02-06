@@ -13,7 +13,7 @@ use bootloader_api::{BootInfo, BootloaderConfig, config::Mapping, entry_point};
 use kernel::{
     mm::{allocator, memory::BootInfoFrameAllocator, user::BuddyFrameAllocator},
     serial_println,
-    tasks::{SCHEDULER, Task, switch::switch_to_first_task},
+    tasks::{SCHEDULER, switch::switch_to_first_task, task::Task},
 };
 use x86_64::VirtAddr;
 use x86_64::instructions::interrupts;
