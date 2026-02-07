@@ -1,7 +1,4 @@
-use crate::{
-    serial_println,
-    tasks::{KERNEL_STACK_SIZE, elf},
-};
+use crate::tasks::{KERNEL_STACK_SIZE, elf};
 use alloc::boxed::Box;
 use core::sync::atomic::{AtomicU64, Ordering};
 use x86_64::{

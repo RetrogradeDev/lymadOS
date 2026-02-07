@@ -27,5 +27,5 @@ if ($LASTEXITCODE -ne 0) { throw "linker failed" }
 Write-Host "Built hello.elf successfully!" -ForegroundColor Green
 
 # Copy to kernel resources
-Copy-Item hello.elf ..\kernel\src\resources\hello.elf -Force -ErrorAction SilentlyContinue
+Copy-Item hello.elf ..\..\kernel\src\resources\hello.elf -Force -ErrorAction SilentlyContinue
 Write-Host "`nCopied to kernel/src/resources/hello.elf" -ForegroundColor Green
