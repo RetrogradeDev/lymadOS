@@ -40,8 +40,6 @@ pub fn load_elf(
     frame_allocator: &mut impl FrameAllocator<Size4KiB>,
     phys_mem_offset: VirtAddr,
 ) -> Result<ElfLoadResult, Error> {
-    serial_println!("load_elf: data len={}", data.len());
-
     // Parse ELF header directly (no allocation)
     if data.len() < core::mem::size_of::<Header>() {
         return Err(Error::MappingFailed("ELF too small for header"));
@@ -70,36 +68,20 @@ pub fn load_elf(
         ph_count
     );
 
-    // Process each program header
-    serial_println!(
-        "About to process {} program headers, ph_offset={}, ph_size={}",
-        ph_count,
-        ph_offset,
-        ph_size
-    );
-
     for i in 0..ph_count {
-        serial_println!("  Processing PH[{}]...", i);
-
         let ph_start = ph_offset + i * ph_size;
-        serial_println!("    ph_start={}", ph_start);
 
         if ph_start + core::mem::size_of::<ProgramHeader>() > data.len() {
             return Err(Error::MappingFailed("Program header out of bounds"));
         }
 
-        serial_println!("    Reading PH struct...");
         let ph_ptr = data.as_ptr();
         let ph_ptr_offset = unsafe { ph_ptr.add(ph_start) };
         let ph: &ProgramHeader = unsafe { &*(ph_ptr_offset as *const ProgramHeader) };
-        serial_println!("    Read complete, type={}", ph.p_type);
 
         // PT_LOAD = 1
         if ph.p_type == 1 {
-            serial_println!("    LOAD segment");
-
             let vaddr_start = ph.p_vaddr;
-            serial_println!("    vaddr_start=0x{:x}", vaddr_start);
             let memsz = ph.p_memsz;
             let filesz = ph.p_filesz;
             let offset = ph.p_offset;
@@ -128,12 +110,8 @@ pub fn load_elf(
             let start_page = vaddr_start & !0xFFF;
             let end_page = (vaddr_start + memsz + 0xFFF) & !0xFFF;
 
-            serial_println!("    Mapping pages 0x{:x} - 0x{:x}", start_page, end_page);
-
             // For each page, map it and copy the relevant portion of the segment
             for page_vaddr in (start_page..end_page).step_by(4096) {
-                serial_println!("    Mapping page 0x{:x}", page_vaddr);
-
                 // Map the page and get its physical address
                 let phys_addr = map_user_page(
                     mapper,
@@ -204,8 +182,6 @@ pub fn load_elf(
     );
 
     for page_addr in (stack_bottom..USER_STACK_TOP).step_by(4096) {
-        serial_println!("    Allocating stack page 0x{:x}", page_addr);
-
         // Map the stack page and get physical address
         let phys_addr = map_user_page(
             mapper,
@@ -215,15 +191,11 @@ pub fn load_elf(
         )
         .map_err(|e| Error::MappingFailed(e))?;
 
-        serial_println!("      Mapped to phys 0x{:x}", phys_addr.as_u64());
-
         // Zero the stack page through kernel's physical memory mapping
         let kernel_ptr = (phys_mem_offset.as_u64() + phys_addr.as_u64()) as *mut u8;
-        serial_println!("      Zeroing via kernel ptr 0x{:x}", kernel_ptr as u64);
         unsafe {
             core::ptr::write_bytes(kernel_ptr, 0, 4096);
         }
-        serial_println!("      Done");
     }
 
     serial_println!("  ELF loaded successfully, entry=0x{:x}", entry);

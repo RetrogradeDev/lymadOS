@@ -22,7 +22,7 @@ pub enum KeyboardEvent {
 }
 
 pub fn push_event(event: Event) {
-    if let Err(_) = EVENT_QUEUE.push(event) {
+    if EVENT_QUEUE.push(event).is_err() {
         serial_println!("[WARNING] Event queue full, dropping event: {:?}", event);
     }
 }

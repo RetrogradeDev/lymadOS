@@ -15,9 +15,6 @@ pub mod switch;
 pub mod syscall;
 pub mod task;
 
-/// Size of each task's user stack (1 page = 4KiB)
-const USER_STACK_SIZE: usize = 4096; // TODO: Auto scale or smth
-
 /// Size of each task's kernel stack (1 page = 4KiB)  
 const KERNEL_STACK_SIZE: usize = 4096;
 

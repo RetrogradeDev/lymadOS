@@ -36,14 +36,15 @@ fn main(boot_info: &'static mut BootInfo) -> ! {
     let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_regions) };
 
     serial_println!("Initializing heap...");
-    allocator::init_heap(phys_mem_offset.as_u64() as usize).expect("Heap initialization failed");
+    allocator::init_heap(phys_mem_offset.as_u64() as usize);
 
     // Just grab all frames and add them to the buddy system for testing
     let mut frame_iter = frame_allocator.usable_frames();
     for frame in frame_iter.by_ref() {
         let phys_addr = frame.start_address();
         let virt_addr = phys_mem_offset + phys_addr.as_u64();
-        allocator::add_frame(virt_addr.as_mut_ptr());
+
+        unsafe { allocator::add_frame(virt_addr.as_mut_ptr()) };
     }
 
     // drop the iterator to make us able to borrow frame_allocator again later
@@ -113,21 +114,15 @@ fn main(boot_info: &'static mut BootInfo) -> ! {
     };
 
     serial_println!(
-        "  ELF Task {} created (entry=0x{:x})",
+        "ELF Task {} created (entry=0x{:x})",
         elf_task.id,
         elf_task.context.rip
     );
-
-    // Also create a simple raw code task for comparison
-    let user_code_1: &[u8] = &USER_TASK_1_CODE;
-    let task1 = unsafe { Task::new(user_code_1, &mut mapper) };
-    serial_println!("  Task {} created (raw code)", task1.id);
 
     {
         let mut scheduler = SCHEDULER.lock();
 
         scheduler.add_task(elf_task);
-        scheduler.add_task(task1);
 
         serial_println!("Total tasks: {}", scheduler.task_count());
 
@@ -142,13 +137,6 @@ fn main(boot_info: &'static mut BootInfo) -> ! {
         switch_to_first_task();
     }
 }
-
-// User task code - simple infinite loops
-// Task 1: just spins with pause
-static USER_TASK_1_CODE: [u8; 4] = [
-    0xF3, 0x90, // pause
-    0xEB, 0xFC, // jmp -4 (back to pause)
-];
 
 #[cfg(not(test))]
 #[panic_handler]

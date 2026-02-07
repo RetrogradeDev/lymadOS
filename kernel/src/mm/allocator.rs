@@ -133,19 +133,25 @@ unsafe impl GlobalAlloc for SlubAllocator {
 #[global_allocator]
 static ALLOCATOR: SlubAllocator = SlubAllocator::new();
 
-pub fn init_heap(offset: usize) -> Result<(), ()> {
+pub fn init_heap(offset: usize) {
     let mut provider = PAGE_ALLOCATOR.lock();
+
     // Initialize directly in the Option to avoid stack overflow
     *provider = Some(GlobalPageAllocator {
         frame_allocator: BuddyAllocator::new(),
     });
+
     if let Some(p) = provider.as_mut() {
         p.frame_allocator.set_offset(offset);
     }
-    Ok(())
 }
 
-pub fn add_frame(start: *mut u8) {
+/// Add a physical frame to the buddy allocator
+/// This should be called for each free frame detected during memory map parsing
+///
+/// # Safety
+/// The caller must ensure that the provided frame is valid and not already in use, as this can lead to memory corruption if misused.
+pub unsafe fn add_frame(start: *mut u8) {
     let mut provider = PAGE_ALLOCATOR.lock();
     if let Some(p) = provider.as_mut() {
         unsafe { p.frame_allocator.add_frame(start) };

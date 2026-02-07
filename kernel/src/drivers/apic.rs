@@ -211,6 +211,11 @@ pub fn end_interrupt() {
     }
 }
 
+/// Initializes the APIC (both local and I/O) based on ACPI tables
+/// Maps the APIC MMIO regions into the kernel's address space
+///
+/// # Safety
+/// This function performs raw pointer dereferencing and MMIO access, so it must be called with correct parameters and only once during initialization.
 pub unsafe fn init(
     rsdp_addr: usize,
     physical_memory_offset: VirtAddr,

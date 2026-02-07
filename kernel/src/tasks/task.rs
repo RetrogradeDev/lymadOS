@@ -1,7 +1,6 @@
 use crate::{
-    mm::user::set_page_user_accessible,
     serial_println,
-    tasks::{KERNEL_STACK_SIZE, USER_STACK_SIZE, elf},
+    tasks::{KERNEL_STACK_SIZE, elf},
 };
 use alloc::boxed::Box;
 use core::sync::atomic::{AtomicU64, Ordering};
@@ -94,68 +93,11 @@ pub struct Task {
     pub state: TaskState,
     pub context: TaskContext,
 
-    /// User-mode stack (heap allocated)
-    _user_stack: Box<[u8; USER_STACK_SIZE]>,
     /// Kernel-mode stack for this task (used when handling interrupts from this task)
     pub kernel_stack: Box<[u8; KERNEL_STACK_SIZE]>,
-    /// Code page (heap allocated, marked user-accessible)
-    _code_page: Box<[u8; 4096]>,
 }
 
 impl Task {
-    /// Create a new task with the given entry point code
-    ///
-    /// # Safety
-    /// The caller must ensure the mapper is valid and the code will be copied
-    /// to a user-accessible page.
-    pub unsafe fn new(
-        entry_code: &[u8],
-        mapper: &mut x86_64::structures::paging::OffsetPageTable,
-    ) -> Self {
-        use x86_64::VirtAddr;
-        use x86_64::structures::paging::{Page, Size4KiB};
-
-        let id = NEXT_TASK_ID.fetch_add(1, Ordering::SeqCst);
-
-        // Allocate user stack
-        let user_stack = Box::new([0u8; USER_STACK_SIZE]);
-        let user_stack_top = user_stack.as_ptr() as u64 + USER_STACK_SIZE as u64;
-
-        // Allocate kernel stack for this task
-        let kernel_stack = Box::new([0u8; KERNEL_STACK_SIZE]);
-
-        // Allocate code page and copy the entry code
-        let mut code_page = Box::new([0u8; 4096]);
-        let copy_len = entry_code.len().min(4096);
-        code_page[..copy_len].copy_from_slice(&entry_code[..copy_len]);
-        let code_ptr = code_page.as_ptr() as u64;
-
-        // Mark user stack as user-accessible
-        let stack_page: Page<Size4KiB> =
-            Page::containing_address(VirtAddr::new(user_stack.as_ptr() as u64));
-        unsafe {
-            set_page_user_accessible(mapper, stack_page, true, false);
-        }
-
-        // Mark code page as user-accessible and executable
-        let code_page_addr: Page<Size4KiB> = Page::containing_address(VirtAddr::new(code_ptr));
-        unsafe {
-            set_page_user_accessible(mapper, code_page_addr, false, true);
-        }
-
-        // Create context pointing to user code and stack
-        let context = TaskContext::new_user(code_ptr, user_stack_top);
-
-        Task {
-            id,
-            state: TaskState::Ready,
-            context,
-            _user_stack: user_stack,
-            kernel_stack,
-            _code_page: code_page,
-        }
-    }
-
     /// Create a new task from an ELF binary
     ///
     /// Loads the ELF into memory at its specified virtual addresses,
@@ -166,33 +108,17 @@ impl Task {
         frame_allocator: &mut impl FrameAllocator<Size4KiB>,
         phys_mem_offset: VirtAddr,
     ) -> Result<Self, elf::Error> {
-        serial_println!("from_elf: starting, elf_data len={}", elf_data.len());
         let id = NEXT_TASK_ID.fetch_add(1, Ordering::SeqCst);
-        serial_println!("from_elf: id={}", id);
 
         // Load ELF and allocate user stack
-        serial_println!("from_elf: calling load_elf...");
         let elf::ElfLoadResult {
             entry_point,
             stack_top,
         } = elf::load_elf(elf_data, mapper, frame_allocator, phys_mem_offset)?;
 
-        serial_println!(
-            "from_elf: load_elf returned entry=0x{:x}, stack=0x{:x}",
-            entry_point,
-            stack_top
-        );
-
         // Allocate kernel stack for this task (used during interrupts)
         // TODO: Consider something better
         let kernel_stack = Box::new([0u8; KERNEL_STACK_SIZE]);
-
-        // We don't need the heap-based user stack or code page for ELF tasks
-        // since they're mapped at fixed virtual addresses.
-        // But we need placeholders to satisfy the struct.
-        // TODO: Fix this
-        let user_stack = Box::new([0u8; USER_STACK_SIZE]);
-        let code_page = Box::new([0u8; 4096]);
 
         // Create context with ELF entry point and mapped stack
         let context = TaskContext::new_user(entry_point, stack_top);
@@ -201,9 +127,7 @@ impl Task {
             id,
             state: TaskState::Ready,
             context,
-            _user_stack: user_stack,
             kernel_stack,
-            _code_page: code_page,
         })
     }
 

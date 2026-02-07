@@ -167,7 +167,6 @@ pub fn read_acpi_tables(
     physical_memory_offset: VirtAddr,
 ) -> AcpiTables<AcpiHandler> {
     let handler = AcpiHandler::new(physical_memory_offset);
-    let acpi_tables = unsafe { AcpiTables::from_rsdp(handler, rsdp_addr).unwrap() };
 
-    acpi_tables
+    unsafe { AcpiTables::from_rsdp(handler, rsdp_addr).unwrap() }
 }

@@ -87,6 +87,9 @@ impl BuddyAllocator {
 
     // Allocates a block of memory
     // Returns a pointer to the start of the block
+    //
+    // # Safety
+    // The caller must ensure that the returned pointer is used correctly and that the order is valid
     pub unsafe fn alloc(&mut self, order: usize) -> Option<*mut u8> {
         if order >= MAX_ORDER {
             return None;
@@ -131,6 +134,9 @@ impl BuddyAllocator {
     }
 
     // Deallocates a block of memory
+    //
+    // # Safety
+    // The caller must ensure that the pointer and order are valid and that the block was previously allocated, as misuse can lead to memory corruption.
     pub unsafe fn dealloc(&mut self, ptr: *mut u8, order: usize) {
         let addr = ptr as usize;
         if addr < self.offset || addr >= self.offset + MAX_PAGES * PAGE_SIZE {
@@ -170,6 +176,9 @@ impl BuddyAllocator {
 
     /// Adds a free frame (order 0) to the allocator.
     /// This is used during initialization to feed memory into the system.
+    ///
+    /// # Safety
+    /// The caller must ensure that the provided frame is valid and not already in use, as this can lead to memory corruption if misused.
     pub unsafe fn add_frame(&mut self, frame: *mut u8) {
         let addr = frame as usize;
         if addr < self.offset || addr >= self.offset + MAX_PAGES * PAGE_SIZE {
