@@ -90,7 +90,7 @@ fn main(boot_info: &'static mut BootInfo) -> ! {
     serial_println!("Creating user tasks...");
 
     // Embed the hello.elf binary at compile time
-    static HELLO_ELF: &[u8] = include_bytes!("resources/hello.elf");
+    static HELLO_ELF: &[u8] = include_bytes!("resources/hello_world.elf");
     serial_println!("Embedded hello.elf: {} bytes", HELLO_ELF.len());
 
     // Use the buddy allocator for ELF loading

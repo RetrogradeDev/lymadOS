@@ -245,10 +245,14 @@ extern "C" fn syscall_entry(
     match syscall_num {
         // Syscall 1: write/print
         // arg1 = fd (1 = stdout)
-        // arg2 = value to print
+        // arg2 = pointer to the string to print in user space
         1 => {
+            serial_println!("Syscall: print(fd={}, ptr={:#x})", arg1, arg2);
+
+            // TODO: Validate the user pointer and read the string from user space safely
+
             if arg1 == 1 {
-                serial_println!("[user] print: {}", arg2);
+                // serial_println!("[user] print: {}", msg);
             }
 
             0
