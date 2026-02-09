@@ -18,6 +18,40 @@ use crate::{gdt::GDT, serial_println};
 
 const SYSCALL_STACK_SIZE: usize = 4096 * 4; // 16 KiB
 
+/// User space address limit - addresses above this are kernel space
+/// Our kernel is mapped in the higher half, so user addresses should be below this
+const USER_SPACE_LIMIT: u64 = 0x0000_8000_0000_0000;
+
+/// Safely read a fixed-length buffer from user memory
+///
+/// Returns None if:
+/// - The pointer is in kernel space
+/// - The buffer would extend into kernel space
+fn read_user_bytes(ptr: u64, len: u64) -> Option<alloc::vec::Vec<u8>> {
+    use alloc::vec::Vec;
+
+    // Validate pointer is in user space
+    if ptr >= USER_SPACE_LIMIT || ptr == 0 {
+        return None;
+    }
+
+    // Check that the entire buffer is in user space
+    let end_addr = ptr.checked_add(len)?;
+    if end_addr > USER_SPACE_LIMIT {
+        return None;
+    }
+
+    let mut result = Vec::with_capacity(len as usize);
+
+    for i in 0..len {
+        let addr = ptr + i as u64;
+        let byte = unsafe { *(addr as *const u8) };
+        result.push(byte);
+    }
+
+    Some(result)
+}
+
 /// Kernel stack for syscall handler
 /// We need a dedicated stack because syscall does NOT switch RSP automatically
 #[repr(C, align(16))]
@@ -198,15 +232,30 @@ extern "C" fn syscall_handler() {
         "lea rax, [rip + {syscall_entry}]",
         "call rax",
 
-        // Return value is in RAX - leave it there
+        // Return value is in RAX - save it temporarily
+        "mov [rsp + 48], rax",  // Store return value where rax was saved
 
         // Disable interrupts for sysret
         "cli",
 
-        // Pop saved argument registers (we don't need to restore them)
-        "add rsp, 56",      // skip r9, r8, r10, rdx, rsi, rdi, rax (7 * 8 = 56)
+        // Restore user registers that might have been clobbered
+        // Stack layout: [rsp+0]=r9, [rsp+8]=r8, [rsp+16]=r10, [rsp+24]=rdx,
+        //               [rsp+32]=rsi, [rsp+40]=rdi, [rsp+48]=return value,
+        //               [rsp+56]=user_rsp, [rsp+64]=r11, [rsp+72]=rcx
+        "mov r9,  [rsp]",
+        "mov r8,  [rsp + 8]",
+        "mov r10, [rsp + 16]",
+        "mov rdx, [rsp + 24]",
+        "mov rsi, [rsp + 32]",
+        "mov rdi, [rsp + 40]",
 
-        // After add rsp, 56 the stack looks like:
+        // Pop saved argument registers
+        "add rsp, 48",      // skip r9, r8, r10, rdx, rsi, rdi (6 * 8 = 48)
+
+        // Pop return value into rax
+        "pop rax",
+
+        // After pop rax, the stack looks like:
         // [rsp+0]  = user_rsp
         // [rsp+8]  = r11 (saved RFLAGS)
         // [rsp+16] = rcx (return RIP)
@@ -238,29 +287,72 @@ extern "C" fn syscall_entry(
     syscall_num: u64,
     arg1: u64,
     arg2: u64,
-    _arg3: u64,
+    arg3: u64,
     _arg4: u64,
     _arg5: u64,
 ) -> u64 {
     match syscall_num {
-        // Syscall 1: write/print
+        // Syscall 1: write - write string to fd
         // arg1 = fd (1 = stdout)
-        // arg2 = pointer to the string to print in user space
+        // arg2 = pointer to the null-terminated string in user space
+        // arg3 = length of the string
+        // Returns: 0 on success, error code on failure
         1 => {
-            serial_println!("Syscall: print(fd={}, ptr={:#x})", arg1, arg2);
-
-            // TODO: Validate the user pointer and read the string from user space safely
-
-            if arg1 == 1 {
-                // serial_println!("[user] print: {}", msg);
+            if arg1 != 1 {
+                // Only stdout (fd=1) is supported for now
+                return 1; // EBADF - bad file descriptor
             }
 
-            0
+            match read_user_bytes(arg2, arg3) {
+                Some(msg) => {
+                    // Convert to string
+                    let msg = alloc::string::String::from_utf8_lossy(&msg);
+
+                    serial_println!("[user] {}", msg);
+                    0 // Success
+                }
+                None => {
+                    serial_println!(
+                        "[kernel] write: invalid user pointer {:#x} or length {}",
+                        arg2,
+                        arg3
+                    );
+                    14 // EFAULT - bad address
+                }
+            }
+        }
+
+        // Syscall 2: write_bytes - write buffer with explicit length
+        // arg1 = fd (1 = stdout)
+        // arg2 = pointer to the buffer in user space
+        // arg3 = length of the buffer
+        // Returns: bytes written on success, -1 on failure
+        2 => {
+            if arg1 != 1 {
+                return u64::MAX; // EBADF
+            }
+
+            match read_user_bytes(arg2, arg3) {
+                Some(bytes) => {
+                    // Try to interpret as UTF-8, fall back to lossy conversion
+                    let msg = alloc::string::String::from_utf8_lossy(&bytes);
+                    serial_println!("[user] {}", msg);
+                    arg3 // Return bytes written
+                }
+                None => {
+                    serial_println!(
+                        "[kernel] write_bytes: invalid user pointer {:#x} or length {}",
+                        arg2,
+                        arg3
+                    );
+                    u64::MAX // Error
+                }
+            }
         }
 
         // Unknown syscall
         _ => {
-            serial_println!("Unknown syscall: num={}", syscall_num);
+            serial_println!("[kernel] Unknown syscall: num={}", syscall_num);
             u64::MAX // Return error
         }
     }

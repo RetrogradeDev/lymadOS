@@ -12,8 +12,11 @@ fn main() -> ! {
     loop {
         print("Hello, world!");
 
-        for _ in 0..1_000_000_000 {
-            // Just a busy loop to slow down the printing
+        // Sleep for a bit to avoid spamming the output too much
+        for _ in 0..1_000_000 {
+            unsafe {
+                core::arch::asm!("pause");
+            }
         }
     }
 }
@@ -21,11 +24,19 @@ fn main() -> ! {
 fn print(s: &str) {
     unsafe {
         core::arch::asm!(
-            "mov rax, 1", // syscall number 1 = print
-            "mov rdi, 1", // fd = 1 (stdout)
-            "mov rsi, {arg}",    // value to print
             "syscall",
-            arg = in(reg) s.as_ptr() as u64,
+
+            // inlateout tells the compiler that rax is both an input and an output register,
+            // and that it will be overwritten by the syscall
+            inlateout("rax") 1u64 => _,    // syscall number 1 = write
+            in("rdi") 1u64,           // fd = 1 (stdout)
+            in("rsi") s.as_ptr(),     // pointer to string
+            in("rdx") s.len(),        // length of the string
+
+            lateout("rcx") _,         // clobbered by syscall
+            lateout("r11") _,         // clobbered by syscall
+
+            options(nostack)
         );
     }
 }
