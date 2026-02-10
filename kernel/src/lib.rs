@@ -8,6 +8,7 @@ use x86_64::instructions::hlt;
 pub mod drivers;
 pub mod events;
 pub mod gdt;
+pub mod graphics;
 pub mod interrupts;
 pub mod mm;
 pub mod tasks;

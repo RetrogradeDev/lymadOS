@@ -11,6 +11,7 @@ use core::panic::PanicInfo;
 use bootloader_api::{BootInfo, BootloaderConfig, config::Mapping, entry_point};
 
 use kernel::{
+    graphics::Framebuffer,
     mm::{allocator, memory::BootInfoFrameAllocator, user::BuddyFrameAllocator},
     serial_println,
     tasks::{SCHEDULER, switch::switch_to_first_task, task::Task},
@@ -35,7 +36,33 @@ fn main(boot_info: &'static mut BootInfo) -> ! {
     let mut mapper = unsafe { kernel::mm::memory::init(phys_mem_offset) };
     let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_regions) };
 
+    serial_println!("Initializing graphics...");
+
+    let mut framebuffer = Framebuffer::new(
+        boot_info.framebuffer.take().unwrap(),
+        &mut frame_allocator,
+        phys_mem_offset.as_u64(),
+    );
+
+    serial_println!("Testing graphics...");
+
+    framebuffer.flip();
+
+    // Write some pixels to the back buffer for testing
+    unsafe {
+        let back_buffer = framebuffer.get_back_buffer_ptr();
+        for y in 0..framebuffer.height {
+            for x in 0..framebuffer.width {
+                let offset = y * framebuffer.stride + x;
+                *back_buffer.add(offset) = 0x00FF00; // Green
+            }
+        }
+    }
+
+    framebuffer.flip();
+
     serial_println!("Initializing heap...");
+
     allocator::init_heap(phys_mem_offset.as_u64() as usize);
 
     // Just grab all frames and add them to the buddy system for testing
